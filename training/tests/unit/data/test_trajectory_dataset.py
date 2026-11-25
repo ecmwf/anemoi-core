@@ -261,9 +261,6 @@ class TestTrajectoryDatasetGetSample:
                 cached = np.transpose(raw, (2, 0, 1, 3))[0, ..., grid_indices]
                 return [cached, None], [1]
 
-            def read_source_records(self, dataset_id, sequence, positions, grid_indices=None):
-                return None
-
             def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
                 stored["positions"] = positions
                 stored["values"] = values

@@ -43,9 +43,8 @@ cache.
 
 -  Each node has one cache. All the GPUs on the node use the same cache.
 -  The cache is deleted at the start of each run.
--  The records are compressed with Blosc (lz4). If each chunk of the
-   source zarr is one date with Blosc compression, the cache writes the
-   chunk as it is. It does not compress the record again.
+-  The records are compressed with Blosc (lz4). A record holds only the
+   variables and grid points that the training uses.
 
 When the training uses more than one node, a worker can read records
 from the cache of a different node. Each node has a cache server for
