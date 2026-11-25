@@ -16,14 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # GITHUB_TOKEN would not trigger CI on the release PR or the publish workflow on the release.
-      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+      - uses: ecmwf/ci-infrastructure/actions/mint-token@main
         id: app-token
         with:
           client-id: ${{ vars.RELEASE_PLEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: write
+          repositories: ${{ github.event.repository.name }}
+          permissions: contents:write issues:write pull-requests:write
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ steps.app-token.outputs.token }}
