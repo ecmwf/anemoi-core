@@ -9,12 +9,22 @@
 
 """ZeroMQ transport for node-local dataset cache entries."""
 
+import logging
 import multiprocessing
 import os
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import zmq
+
+LOGGER = logging.getLogger(__name__)
+
+# the server writes a warning for each request that takes more time than this (seconds)
+SLOW_REQUEST_S = 5.0
+
+_READ_PAYLOAD = None
 
 
 class RemoteCacheMiss(KeyError):
@@ -40,14 +50,30 @@ class CacheKey:
     grid_id: str = "all"
 
 
+def _load_read_payload() -> Callable[..., bytes | None]:
+    """Import dataset_cache and return read_cache_payload.
+
+    dataset_cache imports this module at load time, thus this module cannot import dataset_cache
+    at load time. The server calls this function at start-up, before it accepts requests. The
+    import loads torch and pytorch_lightning, which can take a long time on a node with a high
+    load (more than the 30 s timeout of the clients). If the import occurs at the first request,
+    all the requests of the first remote reads wait for it and time out.
+    """
+    global _READ_PAYLOAD
+    if _READ_PAYLOAD is None:
+        from anemoi.training.utils.dataset_cache import read_cache_payload
+
+        _READ_PAYLOAD = read_cache_payload
+    return _READ_PAYLOAD
+
+
 def _read(entries, request):
     """Return the compressed bytes of each requested record, or None if one is missing.
 
     The server does not decode the records. The client decodes them. Thus, the server uses less
     CPU time, and the network moves the compressed size, not the full size of the arrays.
     """
-    # imported lazily: dataset_cache imports this module at load time
-    from anemoi.training.utils.dataset_cache import read_cache_payload
+    read_cache_payload = _load_read_payload()
 
     entries_path = entries.get(request["dataset_id"])
     if entries_path is None or not request["positions"]:
@@ -65,21 +91,35 @@ def _worker(context, endpoint, entries):
     socket = context.socket(zmq.REP)
     socket.connect(endpoint)
     while True:
+        request = None
         try:
-            payloads = _read(entries, socket.recv_json())
+            request = socket.recv_json()
+            start = time.perf_counter()
+            payloads = _read(entries, request)
         except Exception:
+            start = time.perf_counter()
             payloads = None
         if payloads is None:
             socket.send(b"")
         else:
             # one frame for each record; a record is never empty, so an empty frame means a miss
             socket.send_multipart(payloads, copy=False)
+        elapsed = time.perf_counter() - start
+        if elapsed > SLOW_REQUEST_S:
+            LOGGER.warning(
+                "Dataset cache server (pid %d): a request for %d records took %.1f s",
+                os.getpid(),
+                len(request.get("positions", [])) if isinstance(request, dict) else 0,
+                elapsed,
+            )
 
 
 def _serve(port, entries, ready):
     context = zmq.Context()
     frontend, backend = context.socket(zmq.ROUTER), context.socket(zmq.DEALER)
     try:
+        # import dataset_cache now, not at the first request (see _load_read_payload)
+        _load_read_payload()
         port = frontend.bind_to_random_port("tcp://*") if port == 0 else (frontend.bind(f"tcp://*:{port}") or port)
         backend.bind("inproc://workers")
         for _ in range(min(4, os.cpu_count() or 1)):
