@@ -132,7 +132,7 @@ checkpoint. It can be accessed through:
    { "type": "migrate", "name": "migration_name2.py", "signature": "[...]" }
 
 **********
- Migrator
+ CkptMigrator
 **********
 
 .. automodule:: anemoi.models.migrations.migrator

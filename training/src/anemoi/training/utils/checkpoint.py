@@ -23,7 +23,7 @@ from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.graphs.utils import load_graph_from_file
 from anemoi.graphs.utils import validate_loaded_graph
-from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import CkptMigrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata
 
@@ -149,7 +149,7 @@ class RegisterMigrations(Callback):
     """Callback that register all existing migrations to a checkpoint before storing it."""
 
     def __init__(self):
-        self.migrator = Migrator()
+        self.migrator = CkptMigrator()
 
     def on_save_checkpoint(
         self,
