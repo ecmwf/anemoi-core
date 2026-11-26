@@ -98,3 +98,59 @@ produces only the genuine boundary edges:
           reversed_num_nearest_neighbours: 2
           source_mask_attr_name: global_data_mask
           target_mask_attr_name: regional_hidden_mask
+
+#######################
+ Lookup-table search
+#######################
+
+By default the nearest neighbours are found with a brute-force search
+(pyg-lib if installed, scikit-learn otherwise). ``KNNEdges``,
+``ReversedKNNEdges`` and ``MutualKNNEdges`` accept ``backend: lookup``
+to search through a lookup table instead:
+
+.. code:: yaml
+
+   edges:
+     -  source_name: hidden
+        target_name: data
+        edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 3
+          backend: lookup
+
+The searched nodes are indexed once on a latitude/longitude grid of
+cells. Each cell stores every node within
+:math:`d_k + 2r` of its centre, where :math:`d_k` is the distance from
+the centre to its k-th nearest node and :math:`r` the largest distance
+from the centre to a point of the cell. By the triangle inequality this
+contains the k nearest nodes of any point in the cell, so the result is
+exact (ties may be broken differently). Each query then reads its
+cell's handful of candidates, in a Triton kernel on CUDA.
+
+The cell size is half the mean node spacing :math:`\sqrt{4\pi/N}`, so no
+grid-specific formula is needed. The table is meant for node sets that
+cover the globe (O-, N- and icosahedral grids, HEALPix, stretched
+grids, ...); for regional node sets it raises an error, and the
+``brute_force`` backend should be used instead.
+
+Tables are cached by the name of the searched node set (and its mask,
+if one is applied) together with ``num_nearest_neighbours``, so that
+builders searching the same node set for the same number of neighbours
+share one table. Each number of neighbours gets its own table: a cell
+stores the candidates needed for the k it was built for, and every query
+scans all of them, so serving a 3-neighbour search from a 24-neighbour
+table would make it several times slower. If the node set under a cached
+name changes, the table is rebuilt with a
+warning. The backend is for node sets that stay fixed, such as a hidden
+mesh searched by a graph that is rebuilt every batch; it checks the size
+of the node set on every use, and its coordinates once per table, so a
+name given to a node set that keeps changing is reported on its first
+reuse rather than on every one.
+
+Building the table is itself a brute-force search from every cell
+centre, with a few cells per searched node, so its cost grows with the
+square of the number of searched nodes. It pays off when there are many
+more queries than searched nodes (for example millions of data or
+observation points against a hidden mesh) or when the same node set is
+searched repeatedly. A build expected to take more than about 30
+seconds is announced with a warning.
