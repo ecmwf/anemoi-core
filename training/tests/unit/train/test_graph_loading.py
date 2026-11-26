@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
@@ -147,3 +148,75 @@ def test_graph_build_drops_schema_keys_from_node_builder() -> None:
     )
     assert captured_dataset["dataset"] == dataset_config["dataset"]
     assert captured_dataset["check_variables_compatibility"] == dataset_config["check_variables_compatibility"]
+
+
+def _build_resuming_trainer(tmp_path: Path, *, overwrite: bool = False) -> tuple[AnemoiTrainer, HeteroData]:
+    stored_graph = HeteroData()
+    stored_graph[DEFAULT_DATASET_NAME].x = torch.rand(4, 2)
+    stored_graph["hidden"].x = torch.rand(3, 2)
+    ckpt_path = tmp_path / "last.ckpt"
+    torch.save({"hyper_parameters": {"graph_data": stored_graph}, "state_dict": {}}, ckpt_path)
+
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.graph.overwrite = overwrite
+    trainer.__dict__["_resume_checkpoint_file"] = ckpt_path
+    return trainer, stored_graph
+
+
+def test_resume_reuses_graph_stored_in_checkpoint(tmp_path: Path) -> None:
+    trainer, stored_graph = _build_resuming_trainer(tmp_path)
+
+    with patch("anemoi.training.train.train.GraphCreator") as mock_gc_cls:
+        graph = trainer.graph_data
+
+    mock_gc_cls.assert_not_called()
+    assert torch.equal(graph["hidden"].x.cpu(), stored_graph["hidden"].x)
+
+
+def test_resume_existing_graph_file_takes_precedence_over_checkpoint(tmp_path: Path) -> None:
+    trainer, _ = _build_resuming_trainer(tmp_path)
+    file_graph = HeteroData()
+    file_graph[DEFAULT_DATASET_NAME].x = torch.rand(4, 2)
+    file_graph["hidden"].x = torch.rand(3, 2)
+    graph_path = tmp_path / "graph.pt"
+    torch.save(file_graph, graph_path)
+    trainer.config.system.input.graph = str(graph_path)
+
+    graph = trainer.graph_data
+
+    assert torch.equal(graph["hidden"].x.cpu(), file_graph["hidden"].x)
+
+
+def test_resume_rebuilds_graph_on_overwrite(tmp_path: Path) -> None:
+    trainer, _ = _build_resuming_trainer(tmp_path, overwrite=True)
+    mock_creator = MagicMock()
+    mock_creator.create.return_value = HeteroData()
+
+    with patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator) as mock_gc_cls:
+        trainer.graph_data
+
+    mock_gc_cls.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("loading", "resumes"),
+    [
+        (None, True),
+        ({"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"}, True),
+        ({"_target_": "anemoi.training.checkpoint.loading.strategies.TransferLearningLoader"}, False),
+        ({"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"}, False),
+    ],
+)
+def test_resume_checkpoint_file_only_for_lightning_resumes(tmp_path: Path, loading: dict | None, resumes: bool) -> None:
+    ckpt_path = tmp_path / "last.ckpt"
+    ckpt_path.touch()
+    source = {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": str(ckpt_path)}
+    checkpoint_cfg = {"source": source}
+    if loading is not None:
+        checkpoint_cfg["loading"] = loading
+    trainer = AnemoiTrainer.__new__(AnemoiTrainer)
+    trainer.config = OmegaConf.create({"training": {"checkpoint": checkpoint_cfg}})
+    trainer.start_from_checkpoint = True
+
+    expected = ckpt_path.resolve() if resumes else None
+    assert trainer._resume_checkpoint_file == expected
