@@ -23,10 +23,11 @@ deps = [
 ]
 
 [packages.anemoi-metadata]
+allow-stale-deps = true
 compiler-inputs = []
 deps = [
-  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
-  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
+  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
 ]
 
 [packages.anemoi-models]
