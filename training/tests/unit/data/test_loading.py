@@ -15,12 +15,12 @@ from pytest_mock import MockFixture
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
 
+from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.loading import GroupedDatasetLoadingPolicy
 from anemoi.training.data.loading import MultiDomainBatchSampler
 from anemoi.training.data.loading import MultiDomainLoadingPolicy
 from anemoi.training.data.loading import SynchronizedLoadingPolicy
 from anemoi.training.schemas.dataloader import DataLoadingPolicySchema
-from anemoi.training.data.loading import DataLoadingPolicy
 
 
 def make_sampler(
