@@ -496,6 +496,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_coords: Tensor,
         src_timedeltas: Optional[Tensor] = None,
         dst_timedeltas: Optional[Tensor] = None,
+        src_node_features: Optional[Tensor] = None,
+        dst_node_features: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj]:
         """Build one dynamic graph without batch offsets."""
         device = src_coords.device
@@ -521,12 +523,16 @@ class DynamicGraphProvider(BaseGraphProvider):
         source_nodes.num_nodes = src_coords.shape[0]
         if src_timedeltas is not None:
             source_nodes.timedeltas = src_timedeltas
+        if src_node_features is not None:
+            source_nodes.features = src_node_features
 
         target_nodes = NodeStorage()
         target_nodes.x = dst_coords
         target_nodes.num_nodes = dst_coords.shape[0]
         if dst_timedeltas is not None:
             target_nodes.timedeltas = dst_timedeltas
+        if dst_node_features is not None:
+            target_nodes.features = dst_node_features
 
         edge_attr = torch.cat(
             [attr(x=(source_nodes, target_nodes), edge_index=edge_index) for attr in self.attributes_config.values()],
@@ -552,6 +558,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_batch_sizes: Optional[tuple[int, ...]] = None,
         src_timedeltas: Optional[Tensor] = None,
         dst_timedeltas: Optional[Tensor] = None,
+        src_node_features: Optional[Tensor] = None,
+        dst_node_features: Optional[Tensor] = None,
         **kwargs,
     ) -> tuple[Tensor, Adj]:
         """Build graph dynamically from source and destination nodes.
@@ -573,6 +581,10 @@ class DynamicGraphProvider(BaseGraphProvider):
             Per-source-node signed time offsets in seconds.
         dst_timedeltas : Tensor, optional
             Per-destination-node signed time offsets in seconds.
+        src_node_features : Tensor, optional
+            Runtime source-node features used by configured edge attributes.
+        dst_node_features : Tensor, optional
+            Runtime destination-node features used by configured edge attributes.
         **kwargs
             Additional parameters for graph construction algorithm.
 
@@ -585,9 +597,17 @@ class DynamicGraphProvider(BaseGraphProvider):
             raise ValueError("src_timedeltas must contain one value per source coordinate.")
         if dst_timedeltas is not None and dst_timedeltas.shape[0] != dst_coords.shape[0]:
             raise ValueError("dst_timedeltas must contain one value per destination coordinate.")
+        for name, features, coords in (
+            ("src_node_features", src_node_features, src_coords),
+            ("dst_node_features", dst_node_features, dst_coords),
+        ):
+            if features is not None and (features.ndim != 2 or features.shape[0] != coords.shape[0]):
+                raise ValueError(f"{name} must have shape (num_nodes, num_features), with one row per coordinate.")
 
         if src_batch_sizes is None and dst_batch_sizes is None:
-            return self._build_single_graph(src_coords, dst_coords, src_timedeltas, dst_timedeltas)
+            return self._build_single_graph(
+                src_coords, dst_coords, src_timedeltas, dst_timedeltas, src_node_features, dst_node_features
+            )
         if src_batch_sizes is None or dst_batch_sizes is None:
             raise ValueError("src_batch_sizes and dst_batch_sizes must be provided together.")
         if len(src_batch_sizes) != len(dst_batch_sizes):
@@ -614,6 +634,8 @@ class DynamicGraphProvider(BaseGraphProvider):
                 dst_coords[dst_offset : dst_offset + dst_size],
                 None if src_timedeltas is None else src_timedeltas[src_offset : src_offset + src_size],
                 None if dst_timedeltas is None else dst_timedeltas[dst_offset : dst_offset + dst_size],
+                None if src_node_features is None else src_node_features[src_offset : src_offset + src_size],
+                None if dst_node_features is None else dst_node_features[dst_offset : dst_offset + dst_size],
             )
             edge_attrs.append(edge_attr)
             edge_indices.append(edge_index + edge_index.new_tensor([[src_offset], [dst_offset]]))
@@ -632,6 +654,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_batch_sizes: Optional[tuple[int, ...]],
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
+        src_node_features: Optional[Tensor] = None,
+        dst_node_features: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
         # TODO(Jan): shard graph creation, gather edges, sort, shard
@@ -642,6 +666,8 @@ class DynamicGraphProvider(BaseGraphProvider):
             dst_timedeltas=dst_timedeltas,
             src_batch_sizes=src_batch_sizes,
             dst_batch_sizes=dst_batch_sizes,
+            src_node_features=src_node_features,
+            dst_node_features=dst_node_features,
         )
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
         edge_attr = edge_attr.index_select(0, perm)
@@ -674,6 +700,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         act_checkpoint: bool = True,
         src_timedeltas: Optional[Tensor] = None,
         dst_timedeltas: Optional[Tensor] = None,
+        src_node_features: Optional[Tensor] = None,
+        dst_node_features: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get dynamic edges constructed from node coordinates.
 
@@ -701,6 +729,10 @@ class DynamicGraphProvider(BaseGraphProvider):
             Per-source-node signed time offsets in seconds.
         dst_timedeltas : Tensor, optional
             Per-destination-node signed time offsets in seconds.
+        src_node_features : Tensor, optional
+            Runtime source-node features used by configured edge attributes.
+        dst_node_features : Tensor, optional
+            Runtime destination-node features used by configured edge attributes.
 
         Returns
         -------
@@ -728,6 +760,8 @@ class DynamicGraphProvider(BaseGraphProvider):
                 dst_batch_sizes,
                 shard_edges,
                 model_comm_group,
+                src_node_features,
+                dst_node_features,
                 use_reentrant=False,
             )
         return self._get_edges_impl(
@@ -739,6 +773,8 @@ class DynamicGraphProvider(BaseGraphProvider):
             dst_batch_sizes,
             shard_edges,
             model_comm_group,
+            src_node_features,
+            dst_node_features,
         )
 
 

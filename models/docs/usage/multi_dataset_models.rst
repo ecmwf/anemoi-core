@@ -312,6 +312,9 @@ Valid features:
 ``forcings``
    Forcing variables over the input timestep window.
 
+``target_forcings``
+   Known forcing variables at the output times, preprocessed as model inputs.
+
 ``prognostics``
    Prognostic variables over the input timestep window.
 
@@ -332,7 +335,42 @@ first batch.
    subclass.
 
 ********************************
- Per-dataset bounding and masks
+  Decoder target edge features
+********************************
+
+For dynamic decoder graphs, ``target_edge_features`` selects output-time
+forcing variables by name, in the configured order. Their preprocessed values
+are copied to each incoming edge by an ``AttributeFromNodeToEdge`` builder:
+
+.. code:: yaml
+
+   model:
+     decoders:
+       observations:
+         target_datasets: [obs]
+         target_node_features: [coordinates, target_forcings]
+         target_edge_features: [level]
+         # mapper: ...
+
+   # Under the hidden -> obs graph edge's attributes:
+   level_from_obs:
+     _target_: anemoi.graphs.edges.attributes.AttributeFromNodeToEdge
+     node_axis: target
+     num_features: 1
+
+The selected variables must be present in the model's ``target_forcings``
+argument, including at inference time. The metadata-only ``target_template``
+does not contain these values. The default empty list preserves existing
+behaviour. Keep ``num_features`` consistent with the flattened feature width;
+for tabular observations this is the number of selected variables.
+
+For example, normalized observation altitude on an incoming edge is an
+endpoint feature, not the altitude difference between the two endpoints.
+Variable-length batches and sharded target geometry retain the same row
+ordering as the selected forcing values.
+
+********************************
+  Per-dataset bounding and masks
 ********************************
 
 ``bounding``, ``output_mask`` and ``residual`` are configured
