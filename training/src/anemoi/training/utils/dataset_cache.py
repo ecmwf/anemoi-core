@@ -221,7 +221,14 @@ class DatasetCache:
             raise RuntimeError(msg)
 
     def attach(self, readers: dict[str, Any]) -> None:
-        """Send the sample reads of each reader through the cache."""
+        """Send the sample reads of each gridded reader through the cache.
+
+        Readers that have no ``set_cache`` method, for example the readers of observations, are not cached.
+        """
+        skipped = sorted(name for name, reader in readers.items() if not hasattr(reader, "set_cache"))
+        if skipped:
+            LOGGER.info("The dataset cache does not cache the datasets %s", skipped)
+        readers = {name: reader for name, reader in readers.items() if name not in skipped}
         dataset_ids = {name: _dataset_id(name, reader) for name, reader in readers.items()}
         gathered = self._gather(sorted(dataset_ids.values()))
         if any(ids != gathered[0] for ids in gathered):

@@ -236,13 +236,13 @@ def make_zarr(path: Path, first_date: str = "2023-01-01T00:00:00", dates: int = 
 
 
 def test_dataset_id_separates_date_ranges_and_datasets(tmp_path: Path) -> None:
-    from anemoi.training.data.data_reader import NativeGridDataset
+    from anemoi.training.data.readers import GriddedDataReader
 
     first, second = make_zarr(tmp_path / "first.zarr"), make_zarr(tmp_path / "second.zarr")
-    day_1 = NativeGridDataset(dataset=first, start="2023-01-01", end="2023-01-01")
-    day_3 = NativeGridDataset(dataset=first, start="2023-01-03", end="2023-01-03")
-    other = NativeGridDataset(dataset=second, start="2023-01-01", end="2023-01-01")
-    again = NativeGridDataset(dataset=first, start="2023-01-01", end="2023-01-01")
+    day_1 = GriddedDataReader(dataset_config=first, start="2023-01-01", end="2023-01-01")
+    day_3 = GriddedDataReader(dataset_config=first, start="2023-01-03", end="2023-01-03")
+    other = GriddedDataReader(dataset_config=second, start="2023-01-01", end="2023-01-01")
+    again = GriddedDataReader(dataset_config=first, start="2023-01-01", end="2023-01-01")
     assert day_1.data.shape == day_3.data.shape == other.data.shape  # the shape alone does not separate them
 
     ids = [_dataset_id("data", reader) for reader in (day_1, day_3, other, again)]

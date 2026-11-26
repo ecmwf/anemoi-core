@@ -17,39 +17,47 @@ an epoch.
 Dataset Architecture
 ====================
 
-The data module provides two types of dataset readers that wrap
+The data module provides three types of dataset readers that wrap
 anemoi-datasets data:
 
-Native Grid Dataset
+Gridded Data Reader
 -------------------
 
-The ``NativeGridDataset`` class is used for standard atmospheric data
+The ``GriddedDataReader`` class is used for standard atmospheric data
 on a native grid. It provides a simple interface for reading data samples
 at specified time indices.
 
-Trajectory Dataset
-------------------
+Tabular Data Reader
+-------------------
 
-The ``TrajectoryDataset`` class extends ``NativeGridDataset`` to support
-trajectory-based sampling, where data is organized into temporal
-trajectories. This is useful for tracking atmospheric features over time
-or for specialized training strategies that require trajectory awareness.
+The ``TabularDataReader`` class reads tabular (observation) datasets,
+selected when the dataset configuration has a ``window`` and a
+``frequency``. Each sample holds the observations of its time windows,
+with per-observation coordinates and timedeltas. The timedeltas are in
+seconds from the sample's reference time, so observations in earlier
+windows have more negative values; during rollout they are measured from
+the forecast time of the current step.
 
-Trajectories are defined by:
+Trajectory Data Reader
+----------------------
 
-* **Trajectory start**: The reference datetime from which trajectories begin
-* **Trajectory length**: The number of time steps in each trajectory
+The ``TrajectoryDataReader`` class extends ``GriddedDataReader`` to read
+5-D ``trajectories``-layout datasets (forecast initialisations x steps),
+selected when the dataset configuration has a ``trajectory`` section.
+Each forecast initialisation is an independent sequence and the forecast
+step is the position within it, so a training sample never crosses
+initialisation boundaries.
 
-Each sample in the dataset is associated with a trajectory ID, ensuring
-that samples are correctly grouped and that trajectory boundaries are
-respected during training.
+The optional ``trajectory.sampling.stride`` sets the spacing between
+sample anchors within a sequence: ``null`` (the default) gives
+non-overlapping windows and ``1`` keeps every valid position.
 
 Multi-Dataset
 -------------
 
 The ``MultiDataset`` class provides a higher-level wrapper that can
-synchronize and combine multiple datasets (either ``NativeGridDataset``
-or ``TrajectoryDataset`` instances). This is the primary interface used
+synchronize and combine multiple datasets (``GriddedDataReader``,
+``TabularDataReader`` or ``TrajectoryDataReader`` instances). This is the primary interface used
 for training and supports:
 
 * Synchronizing samples across multiple datasets with different grids
@@ -112,7 +120,9 @@ encoder and decoder group to both domains::
      encoders:
        shared:
          source_datasets: [data, data_2]
-         dataset_fusing_strategy: not_supported
+         dataset_fusing_strategy: none   # one domain per batch, pass-through node embedder
+         node_embedder:
+           _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
          mapper:
            _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
            # ... mapper configuration
@@ -125,7 +135,15 @@ encoder and decoder group to both domains::
            # ... mapper configuration
 
 The ``shared`` key is user-defined; datasets listed in the same group use the
-same mapper weights. ``hidden`` and ``hidden_2`` must be nodes in the
+same mapper weights. Because each batch holds a single domain, the encoder uses
+the ``none`` fusing strategy: the domains must have the same number of input channels, and
+they may never share a batch. Before building the model, training asks the
+loading policy which datasets can share a batch
+(``DataLoadingPolicy.co_loaded_datasets``) and raises if a ``none`` encoder could
+receive two of its source datasets together, so the same encoder under
+``SynchronizedLoadingPolicy`` fails at start-up. Domains with different variables need the
+``sequential`` strategy with a projecting ``node_embedder`` such as ``LinearNodeEmbedder`` (see the anemoi-models documentation on
+multi-dataset models). ``hidden`` and ``hidden_2`` must be nodes in the
 graph configuration, with ``data -> hidden -> data`` and
 ``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level
 ``multidomain`` configuration, which builds on the single-domain stretched-grid
@@ -142,7 +160,7 @@ API Reference
 Dataset Readers
 ---------------
 
-.. automodule:: anemoi.training.data.data_reader
+.. automodule:: anemoi.training.data.readers
    :members:
    :no-undoc-members:
    :show-inheritance:

@@ -183,11 +183,7 @@ class LoadingStrategy(PipelineStage):
         """
         if context.checkpoint_data is None:
             return
-        context.checkpoint_data = apply_checkpoint_corrections(
-            context.checkpoint_data,
-            context.model,
-            context.config,
-        )
+        context.checkpoint_data = apply_checkpoint_corrections(context.checkpoint_data, context.model)
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
         """Set ``model.weights_initialized = True``.
@@ -238,36 +234,6 @@ def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
     return "state_dict" in checkpoint and isinstance(num_layers, int) and isinstance(num_chunks, int) and num_chunks > 0
 
 
-def _drop_keys_with_prefix(state_dict: dict[str, Any], prefixes: tuple[str, ...]) -> int:
-    """Remove every key in ``state_dict`` starting with one of ``prefixes``; return count."""
-    to_remove = [key for key in state_dict if key.startswith(prefixes)]
-    for key in to_remove:
-        del state_dict[key]
-    return len(to_remove)
-
-
-def _inject_model_weights(
-    state_dict: dict[str, Any],
-    model: nn.Module,
-    prefixes: tuple[str, ...],
-) -> int:
-    """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected.
-
-    The configured processor prefixes are extended with every live-model key
-    containing ``model_output_idx``, so those index buffers always carry the live
-    values, not stale checkpoint ones.
-    """
-    model_state_dict = model.state_dict()
-    effective_prefixes = prefixes + tuple(f"model.{key}" for key in model_state_dict if "model_output_idx" in key)
-    injected = 0
-    for key, value in model_state_dict.items():
-        full_key = f"model.{key}"
-        if full_key.startswith(effective_prefixes):
-            state_dict[full_key] = value
-            injected += 1
-    return injected
-
-
 # ---------------------------------------------------------------------------
 # Shared Lightning-parity functions: the single home for the checkpoint-load
 # corrections. Both the pipeline loading strategies and the trainer's
@@ -279,7 +245,6 @@ def _inject_model_weights(
 def apply_checkpoint_corrections(
     checkpoint: dict[str, Any] | None,
     model: nn.Module | None,
-    config: Any,
 ) -> dict[str, Any] | None:
     """Bring a checkpoint into line with the installed anemoi-models and the live model.
 
@@ -287,18 +252,11 @@ def apply_checkpoint_corrections(
 
     1. ``chunking_fix`` — only when the processor declares the geometry it reads
        (see :func:`_chunking_fix_applicable`);
-    2. ``trainable_edge_perm_fix`` — takes the live model;
-    3. :func:`refresh_checkpoint_processors` — driven by
-       ``config.training.update_ds_stats_on_ckpt_load``.
+    2. ``trainable_edge_perm_fix`` — takes the live model.
 
     Each migration's return value is the checkpoint the next step works on.
     Both migrations change only old-format entries, so running them on a
     checkpoint that already has them applied leaves it as it is.
-
-    The edge-permutation migration runs before the refresh because it takes the
-    live model and may rebuild the state dict: run afterwards it would discard the
-    processor buffers the refresh injected. It is also the order the
-    ``on_load_checkpoint`` hook has always used for ``ckpt_path`` loads.
 
     Called by ``BaseTrainingModule.on_load_checkpoint`` on the dict Lightning is
     about to load (resume) and by the pipeline loading strategies on the dict a
@@ -309,19 +267,13 @@ def apply_checkpoint_corrections(
     checkpoint : dict or None
         The loaded checkpoint. Returned unchanged when ``None``.
     model : nn.Module or None
-        The training module. The edge-permutation migration takes it as is; the
-        processor refresh reads its inner ``.model`` (the ``AnemoiModelInterface``),
-        whose state-dict keys lack the leading ``model.`` that the refresh re-adds.
-    config : Any
-        The run config; ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``
-        is read defensively (a missing layer disables the refresh).
+        The training module, which the edge-permutation migration takes as is.
 
     Returns
     -------
     dict or None
-        The corrected checkpoint: whatever the last migration returned, with the
-        processor refresh applied to it. Callers must use this object, not the one
-        they passed in.
+        The corrected checkpoint: whatever the last migration returned. Callers
+        must use this object, not the one they passed in.
     """
     if checkpoint is None:
         return checkpoint
@@ -333,73 +285,7 @@ def apply_checkpoint_corrections(
             "chunking_fix not applied: the checkpoint declares no usable processor num_layers/num_chunks "
             "(e.g. a NoOpProcessor autoencoder, or a raw state_dict save)",
         )
-    checkpoint = _trainable_edge_perm_fix(checkpoint, model)
-
-    update_cfg = getattr(getattr(config, "training", None), "update_ds_stats_on_ckpt_load", None)
-    refresh_checkpoint_processors(
-        checkpoint,
-        getattr(model, "model", None),
-        update_states=bool(getattr(update_cfg, "states", False)),
-        update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
-    )
-    return checkpoint
-
-
-def refresh_checkpoint_processors(
-    checkpoint: dict[str, Any],
-    model: nn.Module | None,
-    *,
-    update_states: bool,
-    update_tendencies: bool,
-) -> None:
-    """Replace stale pre/post-processor weights in ``checkpoint['state_dict']`` with the model's.
-
-    Honours ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``: drops the
-    matching ``model.(pre|post)_processors[_tendencies].*`` keys and re-injects them
-    from ``model`` (plus any ``model_output_idx`` buffers). Mutates the state dict in
-    place. A no-op when neither flag is set or no state dict is present.
-
-    The drop and the re-injection are one operation: without a model to re-inject
-    from, nothing is dropped either, so a checkpoint is never left missing the
-    processor entries a strict load needs. Dropping entries the model cannot replace
-    (a model without those processors) is legitimate and is logged as a warning.
-    """
-    if not (update_states or update_tendencies):
-        return
-    state_dict = checkpoint.get("state_dict") if checkpoint else None
-    if not isinstance(state_dict, dict):
-        return
-
-    prefixes: tuple[str, ...] = ()
-    if update_states:
-        prefixes += ("model.pre_processors.", "model.post_processors.")
-    if update_tendencies:
-        prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
-    if not prefixes:
-        return
-
-    if model is None:
-        LOGGER.warning(
-            "Processor refresh requested (update_ds_stats_on_ckpt_load) but no model was given to "
-            "re-inject from; keeping the checkpoint's processor entries unchanged",
-        )
-        return
-
-    removed = _drop_keys_with_prefix(state_dict, prefixes)
-    injected = _inject_model_weights(state_dict, model, prefixes)
-    if removed and not injected:
-        LOGGER.warning(
-            "Processor refresh dropped %d checkpoint entries under %s but the model has none to "
-            "re-inject; the loaded model keeps its own processor statistics",
-            removed,
-            prefixes,
-        )
-        return
-    LOGGER.debug(
-        "Refreshed checkpoint processors: removed %d stale entries, injected %d from current model",
-        removed,
-        injected,
-    )
+    return _trainable_edge_perm_fix(checkpoint, model)
 
 
 def preserve_anemoi_metadata(model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
