@@ -289,7 +289,10 @@ def apply_checkpoint_corrections(
        (see :func:`_chunking_fix_applicable`);
     2. ``trainable_edge_perm_fix`` — takes the live model;
     3. :func:`refresh_checkpoint_processors` — driven by
-       ``config.training.update_ds_stats_on_ckpt_load``.
+       ``config.training.update_ds_stats_on_ckpt_load``;
+    4. :func:`~anemoi.training.checkpoint.modifiers.peft.restore_checkpoint_adapters`
+       — rebuilds the PEFT adapters the checkpoint's metadata records on the live
+       model, so the strict load that follows matches every key.
 
     Each migration's return value is the checkpoint the next step works on.
     Both migrations change only old-format entries, so running them on a
@@ -342,6 +345,10 @@ def apply_checkpoint_corrections(
         update_states=bool(getattr(update_cfg, "states", False)),
         update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
     )
+
+    from anemoi.training.checkpoint.modifiers.peft import restore_checkpoint_adapters
+
+    restore_checkpoint_adapters(checkpoint, model)
     return checkpoint
 
 

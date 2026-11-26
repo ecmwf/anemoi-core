@@ -11,8 +11,10 @@
 
 from .base import ModelModifier
 from .freezing import FreezingModifierStage
+from .peft import PeftModifierStage
 
 __all__ = [
     "FreezingModifierStage",
     "ModelModifier",
+    "PeftModifierStage",
 ]
