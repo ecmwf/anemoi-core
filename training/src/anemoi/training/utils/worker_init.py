@@ -11,6 +11,7 @@
 import os
 import warnings
 
+
 def set_blosc_threads(blosc_threads: int | None) -> None:
     """Set the number of blosc threads in this process.
 

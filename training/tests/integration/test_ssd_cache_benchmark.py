@@ -19,8 +19,8 @@ from functools import cached_property
 from pathlib import Path
 from statistics import median
 
-import pytorch_lightning as pl
 import pytest
+import pytorch_lightning as pl
 import torch
 import torch.distributed as dist
 from omegaconf import DictConfig
@@ -50,10 +50,7 @@ class _EpochTimer(pl.Callback):
         cache = trainer.datamodule.cache
         if cache is None:
             return None
-        return tuple(
-            counter.value
-            for counter in (cache.cache_hits_local, cache.cache_misses)
-        )
+        return tuple(counter.value for counter in (cache.cache_hits_local, cache.cache_misses))
 
     def on_train_epoch_start(self, trainer, pl_module):
         self._sync()
@@ -97,7 +94,7 @@ def _run_training(config, cache_root=None):
     trainer.datamodule.ds_train.shuffle = False
     trainer.train()
     timer.dataloader_wait_seconds = sum(
-        profiler.recorded_durations.get("[_TrainingEpochLoop].train_dataloader_next", ())
+        profiler.recorded_durations.get("[_TrainingEpochLoop].train_dataloader_next", ()),
     )
     return timer
 
