@@ -33,6 +33,7 @@ pytest_plugins = "anemoi.utils.testing"
 PYTEST_MARKED_TESTS = [
     "multigpu",
     "mlflow",
+    "metadata",
 ]
 
 
@@ -91,6 +92,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         dest="mlflow",
         default=False,
         help="enable tests marked as requiring MLFlow test server",
+    )
+    parser.addoption(
+        "--metadata",
+        action="store_true",
+        dest="metadata",
+        default=False,
+        help="enable tests marked as testing metadata reading",
     )
     parser.addoption(
         "--mlflow-server",

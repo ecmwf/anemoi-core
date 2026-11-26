@@ -167,7 +167,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_metadata' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -n 0 -v training/tests/integration -m metadata
+      pytest_cmd: python3 -m pytest -n 0 -v training/tests/integration -m metadata --metadata
       timeout_minutes: 60
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_metadata
