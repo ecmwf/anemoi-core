@@ -224,13 +224,8 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    model: with the ``transfer_learning`` loading strategy the new dataset's
    fusion block is missing from the checkpoint and keeps this
    initialisation, so the model's predictions are unchanged at the start of
-   fine-tuning.
-
-   Because the block's output then does not depend on the new dataset, its
-   encoder gets no gradient at first and learns slowly for the first
-   steps. A small positive value (e.g. ``1e-3``) starts the block as a
-   near-identity instead, and the new encoder gets gradient from the first
-   step.
+   fine-tuning. With ``value_init_scale: 0.0``, the new dataset's encoder
+   gets no gradient at first.
 
    .. code:: yaml
 

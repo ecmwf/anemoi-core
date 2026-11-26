@@ -51,7 +51,7 @@ class GatedFusionAggregatorSchema(BaseModel):
         default=None,
         description=(
             "Scale the default initialisation of each fusion block's value projection by this factor: "
-            "0.0 starts every block as an exact identity, a small value (e.g. 1e-3) as a near-identity."
+            "0.0 starts every block as an exact identity."
         ),
     )
     gradient_checkpointing: bool = False

@@ -263,11 +263,7 @@ class GatedLatentFusion(nn.Module):
 
         ``0.0`` makes the block an exact identity at initialisation. Its
         output then does not depend on ``encoder_output``, so the encoder
-        feeding it gets no gradient at first; that gradient grows as the
-        value projection moves away from zero, so a newly added encoder
-        learns slowly for the first steps of training. A small positive value
-        (e.g. ``1e-3``) gives a near-identity whose encoder gets gradient from
-        the first step.
+        feeding it gets no gradient at first.
     """
 
     def __init__(self, hidden_dim: int, value_init_scale: float | None = None) -> None:
@@ -329,9 +325,8 @@ class GatedFusionAggregator(BaseLatentAggregator):
     With ``value_init_scale=0.0`` every fusion block starts as an exact
     identity, so a dataset added to a trained model (e.g. through transfer
     learning, where its block is missing from the checkpoint) leaves the
-    model's predictions unchanged at the start of fine-tuning. A small
-    positive ``value_init_scale`` instead gives a near-identity whose new
-    encoder gets gradient from the first step (see :class:`GatedLatentFusion`).
+    model's predictions unchanged at the start of fine-tuning. The new
+    dataset's encoder then gets no gradient at first.
 
     ```
     latent_aggregator:
