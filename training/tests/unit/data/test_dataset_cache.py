@@ -187,18 +187,67 @@ class TestDatasetCacheNamespace:
 
 
 class FakeData:
-    shape = (4, 2, 1, 5)
-    dtype = np.dtype("float32")
-    path = "/data/dataset.zarr"
+    """The parts of an anemoi-datasets dataset that _dataset_id uses."""
+
+    def __init__(self, shape: tuple = (4, 2, 1, 5), tree: str = "GriddedZarr\n  path: /data/a.zarr") -> None:
+        self.shape, self.ndim, self.dtype, self._tree = shape, len(shape), np.dtype("float32"), tree
+
+    def tree(self) -> str:
+        return self._tree
 
 
 class IdentityReader:
     variables = ("a", "b")
-    resolution = "o96"
 
     def __init__(self, metadata: dict) -> None:
         self.data = FakeData()
         self.metadata = metadata
+
+
+def make_zarr(path: Path, first_date: str = "2023-01-01T00:00:00", dates: int = 16) -> str:
+    """Write a small anemoi-datasets zarr: 6-hourly dates, 2 variables, 4 grid points."""
+    import zarr
+
+    variables, grid = ["a", "b"], 4
+    root = zarr.open_group(str(path), mode="w", zarr_format=2) if zarr.__version__ >= "3" else zarr.open(str(path), "w")
+    data = np.arange(dates * len(variables) * grid, dtype="f4").reshape(dates, len(variables), 1, grid)
+    root.create_dataset("data", data=data, chunks=(1, len(variables), 1, grid))
+    root.create_dataset("dates", data=np.datetime64(first_date) + np.arange(dates) * np.timedelta64(6, "h"))
+    root.create_dataset("latitudes", data=np.linspace(-80, 80, grid))
+    root.create_dataset("longitudes", data=np.linspace(0, 350, grid))
+    for name in ("mean", "stdev", "maximum", "minimum", "sums", "squares", "count", "has_nans"):
+        root.create_dataset(name, data=np.ones(len(variables)))
+    end_date = np.datetime64(first_date) + (dates - 1) * np.timedelta64(6, "h")
+    root.attrs.update(
+        {
+            "frequency": "6h",
+            "resolution": "o96",
+            "start_date": first_date,
+            "end_date": str(end_date),
+            "variables": variables,
+            "missing_dates": [],
+            "ensemble_dimension": 1,
+            "field_shape": [grid],
+            "flatten_grid": True,
+            "version": "0.30",
+        },
+    )
+    return str(path)
+
+
+def test_dataset_id_separates_date_ranges_and_datasets(tmp_path: Path) -> None:
+    from anemoi.training.data.data_reader import NativeGridDataset
+
+    first, second = make_zarr(tmp_path / "first.zarr"), make_zarr(tmp_path / "second.zarr")
+    day_1 = NativeGridDataset(dataset=first, start="2023-01-01", end="2023-01-01")
+    day_3 = NativeGridDataset(dataset=first, start="2023-01-03", end="2023-01-03")
+    other = NativeGridDataset(dataset=second, start="2023-01-01", end="2023-01-01")
+    again = NativeGridDataset(dataset=first, start="2023-01-01", end="2023-01-01")
+    assert day_1.data.shape == day_3.data.shape == other.data.shape  # the shape alone does not separate them
+
+    ids = [_dataset_id("data", reader) for reader in (day_1, day_3, other, again)]
+    assert len(set(ids[:3])) == 3  # other dates, or another dataset: other records
+    assert ids[3] == ids[0]  # the same data opened in the same way: the same records
 
 
 def test_dataset_id_does_not_use_metadata() -> None:
@@ -423,10 +472,12 @@ def test_remote_read_from_a_forked_dataloader_worker(tmp_path: Path, sample_data
 # ---------------------------------------------------------------------------
 
 
-class AttachableReader(FakeReader, IdentityReader):
+class AttachableReader(FakeReader):
+    variables = ("a", "b", "c")
+
     def __init__(self, data: np.ndarray) -> None:
-        FakeReader.__init__(self, data)
-        self.metadata, self.variables, self.resolution = {}, ("a", "b", "c"), "o96"
+        super().__init__(data)
+        self.data = FakeData(data.shape, tree=f"Subset\n  dates: {data.shape[0]}\n  GriddedZarr")
         self.cache = None
 
     def set_cache(self, cache: DatasetCache, dataset_id: str) -> None:

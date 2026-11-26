@@ -109,16 +109,20 @@ class DatasetCacheNamespace:
 def _dataset_id(name: str, reader: Any) -> str:
     """Return a name for the dataset of a reader that is the same in all processes.
 
-    Do not use the dataset metadata: for a cloned dataset, the dates can be invalid, and then the
-    metadata changes from one process to the next.
+    Two readers get the same name only if they opened the same data in the same way. Then they
+    can share records. The anemoi-datasets tree of the dataset gives the zarr paths and each
+    operation on them, for example select, drop, start, end and frequency. Thus, two date ranges
+    of one dataset, or two datasets with the same shape, get different names.
+
+    Do not use the dates or the dataset metadata: for a cloned dataset, the dates can be invalid,
+    and then the metadata changes from one process to the next.
     """
     identity = {
         "name": name,
+        "tree": str(reader.data.tree()),
         "shape": tuple(int(size) for size in reader.data.shape),
         "dtype": str(reader.data.dtype),
-        "source": str(getattr(reader.data, "path", type(reader.data).__name__)),
         "variables": list(reader.variables),
-        "resolution": str(reader.resolution),
     }
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
     return f"{name}:{digest}"
