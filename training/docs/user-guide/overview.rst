@@ -9,7 +9,7 @@ Anemoi Training is built to be flexible and customizable, allowing you
 to adjust various aspects of the model and training process without
 modifying the underlying code. The framework supports different model
 architectures, including Graph Neural Networks (GNNs), Graph
-Transformers, and Transformers with Flash Attention.
+Transformers, and Transformers.
 
 ##############
  User Journey
