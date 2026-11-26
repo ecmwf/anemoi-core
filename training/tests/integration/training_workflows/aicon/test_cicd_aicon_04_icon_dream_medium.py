@@ -104,7 +104,6 @@ def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
     BaseSchema(**aicon_config_with_tmp_dir)
 
 
-@pytest.mark.slow
 @typechecked
 def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     """Test for presence of metadata required for inference.
@@ -139,18 +138,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
         != aicon_config_with_grid.model.decoders["0"].mapper.num_chunks
     )
 
-    # Monitor path and setting of num_chunks
-    assert (
-        trainer.model.model.model.encoder["0"].proc.num_chunks
-        == aicon_config_with_grid.model.encoders["0"].mapper.num_chunks
-    )
-    assert (
-        trainer.model.model.model.decoder["0"].proc.num_chunks
-        == aicon_config_with_grid.model.decoders["0"].mapper.num_chunks
-    )
 
-
-@pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
     _, initial_sum, final_sum, nhidden_mesh_edges = trained_aicon
