@@ -29,11 +29,13 @@ from .spectral import PowerSpectrumLoss
 from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
 from .variable_mapper import LossVariableMapper
+from .wavelet import DTCWT2DLoss
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
     "CombinedLoss",
+    "DTCWT2DLoss",
     "EnergyScoreLoss",
     "FourierCorrelationLoss",
     "GraphEdgeCRPSLoss",

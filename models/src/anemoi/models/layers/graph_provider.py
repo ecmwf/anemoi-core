@@ -476,6 +476,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
         edge_mask: Optional[Tensor] = None,
+        validate_weights: bool = False,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -495,8 +496,11 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Whether to normalize weights per row (target node) so each row sums to 1
         edge_mask : Tensor, optional
             Boolean mask which selects graph edges before constructing the matrix
+        validate_weights : bool
+            Require finite, nonnegative weights before row normalization
         """
         super().__init__()
+        self.validate_weights = validate_weights
 
         if (file_path is None and edges_name is None) or (file_path is not None and edges_name is not None):
             raise ValueError("Exactly one of file_path or edges_name must be provided.")
@@ -567,6 +571,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
             edge_index = edge_index[:, edge_mask]
             weights = weights[edge_mask]
 
+        if self.validate_weights and weights.is_complex():
+            raise ValueError("Projection weights must be real, finite and nonnegative")
         matrix = coo_matrix(
             (
                 weights.detach().to(dtype=torch.float32, device="cpu").contiguous().numpy(),
@@ -585,9 +591,16 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     def _create_csr_matrix_from_scipy(self, matrix: spmatrix, row_normalize: bool) -> None:
         """Create sparse projection CSR matrix from a SciPy sparse matrix."""
+        if self.validate_weights:
+            if min(matrix.shape) == 0:
+                raise ValueError("Projection matrix must have nonempty source and destination dimensions")
+            if np.iscomplexobj(matrix.data) or not np.isfinite(matrix.data).all() or (matrix.data < 0).any():
+                raise ValueError("Projection weights must be real, finite and nonnegative")
         matrix = matrix.astype(np.float32, copy=False).tocsr()
         matrix.sum_duplicates()  # coalesce duplicate entries
 
+        if self.validate_weights and not np.isfinite(np.asarray(matrix.sum(axis=1))).all():
+            raise ValueError("Projection row sums must be finite in float32")
         if row_normalize:
             matrix = self._row_normalize_matrix(matrix)
 
@@ -681,6 +694,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         config: object,
         graph_data: Optional[HeteroData] = None,
         data_node_name: str = "data",
+        *,
+        validate_weights: bool = False,
     ) -> Optional["ProjectionGraphProvider"]:
         """Create a provider from a config mapping, choosing the mode from the keys present.
 
@@ -692,6 +707,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
         Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
         ambiguous config or when *graph_data* is required but missing.
+        Set *validate_weights* to reject nonfinite/negative weights before
+        normalization; existing callers retain permissive behavior by default.
         """
         # --- normalise to plain dict ---
         if config is None:
@@ -718,6 +735,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
             return cls(
                 file_path=config["matrix_path"],
                 row_normalize=bool(config.get("row_normalize", False)),
+                validate_weights=validate_weights,
             )
 
         if has_edges:
@@ -729,6 +747,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 edge_weight_attribute=config.get("edge_weight_attribute"),
                 src_node_weight_attribute=config.get("src_node_weight_attribute"),
                 row_normalize=bool(config.get("row_normalize", False)),
+                validate_weights=validate_weights,
             )
 
         # target-grid mode: require its signal key here for a clear error, not a deep KeyError.
@@ -758,4 +777,5 @@ class ProjectionGraphProvider(BaseGraphProvider):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=config.get("src_node_weight_attribute"),
             row_normalize=bool(config.get("row_normalize", False)),
+            validate_weights=validate_weights,
         )
