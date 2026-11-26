@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 
-from anemoi.metadata import Metadata
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -22,6 +21,9 @@ from anemoi.utils.testing import skip_if_offline
 @skip_if_offline
 @pytest.mark.metadata
 def test_metadata_reading(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
+    # Imported here so that collecting the tests does not require anemoi-metadata
+    from anemoi.metadata import Metadata
+
     cfg, url = gnn_config
     get_test_archive(url)
 

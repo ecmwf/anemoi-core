@@ -42,6 +42,7 @@ dependencies = [
   "pydantic>=2.12.5",
   "pyyaml>=6.0.3",
 ]
+optional-dependencies.all = []
 optional-dependencies.dev = [
   "anemoi-metadata[tests]",
   "pre-commit>=3.3.3",

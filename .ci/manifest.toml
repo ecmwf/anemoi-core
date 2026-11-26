@@ -5,14 +5,14 @@ visibility = "public"
 fork-pull-requests = true
 allow-stale-deps = true
 compiler-inputs = []
-# An umbrella: `package = "anemoi-core"` stands for the three packages below.
+# An umbrella: `package = "anemoi-core"` stands for the packages below.
 # Consumers may instead name the ones they use.
 meta = true
 ci-pre-commit = false
 full-history = true
 
 [[deps]]
-package = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
+package = ["anemoi-graphs", "anemoi-metadata", "anemoi-models", "anemoi-training"]
 
 [packages.anemoi-graphs]
 allow-stale-deps = true
@@ -20,6 +20,13 @@ compiler-inputs = []
 deps = [
   { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
   { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+]
+
+[packages.anemoi-metadata]
+compiler-inputs = []
+deps = [
+  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
+  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
 ]
 
 [packages.anemoi-models]
@@ -41,12 +48,12 @@ deps = [
   { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
 ]
 
-# Each leg builds, installs and tests the three packages together, and publishes
+# Each leg builds, installs and tests the packages together, and publishes
 # a wheel of each, so a consumer's leg takes the ones tested on its own Python
 # (python-version-input).
 [matrix.test]
 triggers = ["upstream-change", "rebuild-request"]
-packages = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
+packages = ["anemoi-graphs", "anemoi-metadata", "anemoi-models", "anemoi-training"]
 
 [matrix.test.defaults]
 sccache = false
