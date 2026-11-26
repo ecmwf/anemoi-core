@@ -13,6 +13,7 @@ import json
 import logging
 import multiprocessing
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ SLOW_REQUEST_S = 5.0
 # the client stops to wait for a reply after this time (milliseconds)
 TIMEOUT_MS = 30_000
 SERVER_THREADS = 4
+# the grid_id of a record: FULL_GRID, or 16 hex digits for a grid shard
+GRID_ID = re.compile(rf"{cache_format.FULL_GRID}|[0-9a-f]{{16}}")
 
 
 class RemoteCacheError(ConnectionError):
@@ -41,6 +44,11 @@ def _read(cache_path: Path, request: dict) -> list[bytes]:
     The server does not decode the records. The client decodes them. Thus, the server uses less
     CPU time, and the network moves the compressed size, not the full size of the arrays.
     """
+    # the request comes from the network: do not let it select a file outside the cache
+    grid_id, sequence, positions = request["grid_id"], request["sequence"], request["positions"]
+    if not GRID_ID.fullmatch(str(grid_id)) or not all(type(i) is int for i in [sequence, *positions]):
+        msg = f"incorrect request: {request}"
+        raise ValueError(msg)
     entries = cache_format.entries_path(cache_path, request["dataset_id"])
     return [
         cache_format.read_payload(

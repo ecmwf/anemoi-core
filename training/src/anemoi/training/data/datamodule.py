@@ -9,6 +9,7 @@
 
 
 import logging
+import multiprocessing
 from functools import cached_property
 from functools import partial
 
@@ -152,6 +153,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         # configs that are not validated can have no cache_dir: then there is no cache
         if getattr(hardware, "cache_dir", None) is None or self.cache is not None:
             return
+        # null uses the default of the platform, which is not fork on macOS, or on Linux from Python 3.14
+        context = self.config.dataloader.get("multiprocessing_context", None) or multiprocessing.get_start_method()
+        if context != "fork":
+            msg = (
+                f"The dataset cache needs fork dataloader workers, not {context}. Set multiprocessing_context to fork."
+            )
+            raise ValueError(msg)
         # imported here because the cache needs pyzmq, an optional dependency
         from anemoi.training.utils.dataset_cache import DatasetCache
 
@@ -213,8 +221,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         extra = {}
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
-            import multiprocessing
-
             ctx = self.config.dataloader.multiprocessing_context
             extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
 

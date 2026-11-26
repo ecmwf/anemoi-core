@@ -496,7 +496,9 @@ def test_datamodule_starts_and_stops_the_cache(tmp_path: Path, sample_data: np.n
     hardware = {"cache_max_fraction": 0.9, "hostname_suffix": None}
     if cache_dir is not None:
         hardware["cache_dir"] = str(tmp_path / cache_dir)
-    datamodule.config = OmegaConf.create({"system": {"hardware": hardware}})
+    datamodule.config = OmegaConf.create(
+        {"system": {"hardware": hardware}, "dataloader": {"multiprocessing_context": "fork"}},
+    )
     readers = {"train": AttachableReader(sample_data), "valid": AttachableReader(sample_data[:4])}
     datamodule.__dict__["ds_train"] = SimpleNamespace(data_readers={"data": readers["train"]})
     datamodule.__dict__["ds_valid"] = SimpleNamespace(data_readers={"data": readers["valid"]})

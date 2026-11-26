@@ -87,6 +87,12 @@ for grid shards.
    writes the cache and takes approximately the same time as a run
    with no cache.
 
+-  The cache works only when the dataloader workers start with
+   ``fork``. This is the default on Linux. Do not set
+   ``dataloader.multiprocessing_context`` to ``spawn`` or
+   ``forkserver`` when the cache is on. From Python 3.14, the default on
+   Linux is ``forkserver``: then set it to ``fork``.
+
 -  At the start of the run, each rank makes sure that it can find the
    address of each other node (the hostname and ``hostname_suffix``).
    If it cannot find an address, the run stops with an error. Then make
