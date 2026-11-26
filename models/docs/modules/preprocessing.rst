@@ -75,6 +75,12 @@ Example tranform functions:
 
    Atanh remapper transform function examples.
 
+Each remapper ``config`` lists variables per method, for example ``log1p: ["tp"]``.
+Variables not listed use ``default``, which is ``none`` (no transformation) if omitted.
+Parameters of a method are set under ``method_kwargs`` and apply to every variable
+using that method; use several remappers to give the same method different parameters.
+Method names and their parameters are checked when the configuration is validated.
+
 Example configuration:
 
 .. code:: yaml
