@@ -1,5 +1,5 @@
 {
-    "training": "0.17.2",
+    "training": "0.18.0",
     "graphs": "0.9.9",
-    "models": "0.20.0"
+    "models": "0.21.0"
 }
