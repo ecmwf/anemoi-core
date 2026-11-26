@@ -272,7 +272,7 @@ def test_open_from_checkpoint(golden_metadata: tuple[str, dict[str, Any]], empty
 
 
 class TestG1NestedDatasetSection:
-    """``dataset`` is keyed by dataset name from 2.0; a flat dump is still read."""
+    """``dataset`` is keyed by dataset name from 2.0."""
 
     def test_data_request_per_dataset(self) -> None:
         meta = Metadata.from_dict(load_golden("f3_multi_dataset"))

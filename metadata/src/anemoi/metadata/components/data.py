@@ -73,13 +73,13 @@ from .base import ComponentAdapter
 
 LOG = logging.getLogger(__name__)
 
-_VARIABLE_TYPE_KEYS = ("forcing", "prognostic", "diagnostic", "target")
+_VARIABLE_TYPE_KEYS = {"forcing", "prognostic", "diagnostic", "target"}
 
 #: Categories added by :meth:`DataAdapter.variable_categories` on top of the variable types.
-_DERIVED_CATEGORIES = ("computed", "accumulation", "constant")
+_DERIVED_CATEGORIES = {"computed", "accumulation", "constant"}
 
 #: Every category name :meth:`DataAdapter.select_variables` accepts.
-VARIABLE_CATEGORIES = _VARIABLE_TYPE_KEYS + _DERIVED_CATEGORIES
+VARIABLE_CATEGORIES = _VARIABLE_TYPE_KEYS | _DERIVED_CATEGORIES
 
 GRIDDED = "gridded"
 TABULAR = "tabular"
@@ -500,11 +500,11 @@ class DataAdapter(ComponentAdapter):
 
 
 class DataReaderV0_2(DataAdapter):
-    """Version reader for the component version ``0.2`` (metadata format ``2.0``, also written by current training).
+    """Version reader for the component version ``0.2`` (metadata format ``2.0``).
 
     Knows where the data values are stored: the per dataset
     ``metadata_inference.<dataset>`` block and the raw ``dataset`` dump (keyed
-    by dataset name, with a flat fallback).  Every dataset of this layout is
+    by dataset name).  Every dataset of this layout is
     gridded.  A reader for another layout subclasses the nearest one and
     overrides what differs; it is then combined with every data type by
     :func:`register_data_version`.
@@ -532,8 +532,7 @@ class DataReaderV0_2(DataAdapter):
     def _dataset_section(self) -> dict[str, Any]:
         """Return the raw ``dataset`` dump of this dataset (not a copy: for internal reading).
 
-        The dump is keyed by dataset name from format 2.0; a flat dump (one
-        dataset, no per-name key) is accepted as a fallback.  A tabular dataset
+        The dump is keyed by dataset name from format 2.0.  A tabular dataset
         has an empty block under its name, which is returned as it is.
         """
         section = self._section("dataset")
