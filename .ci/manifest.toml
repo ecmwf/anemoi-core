@@ -3,6 +3,7 @@ name = "anemoi-core"
 repo = "ecmwf/anemoi-core"
 visibility = "public"
 fork-pull-requests = true
+allow-stale-deps = true
 compiler-inputs = []
 # An umbrella: `package = "anemoi-core"` stands for the three packages below.
 # Consumers may instead name the ones they use.
@@ -14,27 +15,30 @@ full-history = true
 package = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
 
 [packages.anemoi-graphs]
+allow-stale-deps = true
 compiler-inputs = []
 deps = [
-  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
-  { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
+  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+  { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
 ]
 
 [packages.anemoi-models]
+allow-stale-deps = true
 compiler-inputs = []
 deps = [
   { package = "anemoi-graphs" },
-  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
-  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
+  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
 ]
 
 [packages.anemoi-training]
+allow-stale-deps = true
 compiler-inputs = []
 deps = [
   { package = ["anemoi-graphs", "anemoi-models"] },
-  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
-  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
-  { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version" },
+  { repo = "ecmwf/anemoi-utils", package = "anemoi-utils", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+  { repo = "ecmwf/anemoi-transform", package = "anemoi-transform", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
+  { repo = "ecmwf/anemoi-datasets", package = "anemoi-datasets", ref = "main", compiler-inputs = [], python-version-input = "python-version", allow-stale = false },
 ]
 
 # Each leg builds, installs and tests the three packages together, and publishes
@@ -45,6 +49,7 @@ triggers = ["upstream-change", "rebuild-request"]
 packages = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
 
 [matrix.test.defaults]
+sccache = false
 job-script = "./.ci/test.sh.j2"
 runs-on = "ubuntu-24.04"
 platform = "gh-ubuntu-24.04"
