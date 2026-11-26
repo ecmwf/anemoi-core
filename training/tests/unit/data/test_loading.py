@@ -7,12 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
 
 from anemoi.training.data.loading import MultiDomainBatchSampler
+from anemoi.training.data.loading import MultiDomainLoadingPolicy
 
 
 def make_sampler(
@@ -116,3 +119,24 @@ def test_multi_domain_sampler_resumes_at_each_batch_boundary_after_first_epoch(n
         resumed.load_state_dict(sampler.state_dict())
 
         assert consumed + list(resumed) == expected
+
+
+def _heterogeneous_dataset() -> SimpleNamespace:
+    return SimpleNamespace(
+        name_to_index={"domain_a": {"2t": 0}, "domain_b": {"tp": 0}},
+        data={
+            "domain_a": SimpleNamespace(typed_variables={}),
+            "domain_b": SimpleNamespace(typed_variables={}),
+        },
+    )
+
+
+def test_multi_domain_policy_rejects_heterogeneous_variables_by_default() -> None:
+    with pytest.raises(ValueError, match="same variables in the same order"):
+        MultiDomainLoadingPolicy().check_dataset_compatibility(_heterogeneous_dataset())
+
+
+def test_multi_domain_policy_accepts_heterogeneous_variables_when_enabled() -> None:
+    policy = MultiDomainLoadingPolicy(allow_heterogeneous_variables=True)
+
+    policy.check_dataset_compatibility(_heterogeneous_dataset())

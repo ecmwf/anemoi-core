@@ -1,0 +1,3 @@
+_target_: anemoi.models.layers.embedder.DeepSetEmbedder
+emb_dim: 16
+out_dim: 64

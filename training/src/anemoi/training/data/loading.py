@@ -204,6 +204,19 @@ class MultiDomainDataset(ConcatDataset):
 class MultiDomainLoadingPolicy(DataLoadingPolicy):
     """Each sample comes from exactly one domain; batches are domain-homogeneous."""
 
+    def __init__(self, allow_heterogeneous_variables: bool = False) -> None:
+        """Initialise the policy.
+
+        Parameters
+        ----------
+        allow_heterogeneous_variables : bool, optional
+            Allow domains to expose different ordered field sets. Common fields
+            must still have compatible metadata. The model must provide a
+            variable-aware input transform, and losses remain dataset-specific,
+            so fields absent from a domain are not included in that domain's loss.
+        """
+        self.allow_heterogeneous_variables = allow_heterogeneous_variables
+
     def build_dataset(
         self,
         data_readers: dict[str, BaseAnemoiReader],
@@ -243,7 +256,8 @@ class MultiDomainLoadingPolicy(DataLoadingPolicy):
         )
 
     def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
-        check_datasets_variables_order(dataset.name_to_index)
+        if not self.allow_heterogeneous_variables:
+            check_datasets_variables_order(dataset.name_to_index)
         check_datasets_variables_compatibility(
             {name: data.typed_variables for name, data in dataset.data.items()},
             **options,
