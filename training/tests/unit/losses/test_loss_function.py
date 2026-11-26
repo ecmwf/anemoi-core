@@ -1010,7 +1010,7 @@ def test_sht_losses_score_the_two_sided_spectrum(
         _two_sided_coefficients(loss.transform(pred)),
         _two_sided_coefficients(loss.transform(target)),
     )
-    actual = loss(pred, target, squash=False)
+    actual = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
 
     torch.testing.assert_close(actual, expected)
 
@@ -1037,7 +1037,9 @@ def test_sht_amse_is_proportional_to_mse_for_a_scaled_prediction() -> None:
     ) / (4 * math.pi)
     expected = (4 * math.pi) ** 2 * (area_weights[:, None] * (pred - target)[0, 0, 0] ** 2).sum(dim=0)
 
-    torch.testing.assert_close(loss(pred, target, squash=False), expected, rtol=1e-6, atol=0)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
+
+    torch.testing.assert_close(out, expected, rtol=1e-6, atol=0)
 
 
 def test_sht_fourier_correlation_is_zero_for_a_perfect_prediction() -> None:
@@ -1047,7 +1049,7 @@ def test_sht_fourier_correlation_is_zero_for_a_perfect_prediction() -> None:
     loss = FourierCorrelationLoss(transform="octahedral_sht", nlat=nlat)
     target = torch.randn(1, 1, 1, _octahedral_expected_points(nlat), 2, dtype=torch.float64)
 
-    out = loss(target.clone(), target, squash=False)
+    out = loss(_gridded_source_view(target.clone()), _gridded_source_view(target), squash=False)
 
     torch.testing.assert_close(out, torch.zeros_like(out), atol=1e-10, rtol=0)
 
