@@ -84,18 +84,6 @@ class EnsembleTraining(BaseTrainingModule):
             If you would like to run in deterministic mode, please use aifs-train"
         )
 
-        self.effective_lr = (
-            config.system.hardware.num_nodes
-            * config.system.hardware.num_gpus_per_node
-            * config.training.optimization.lr
-            / num_gpus_per_ensemble
-        )
-        LOGGER.info(
-            "Base (config) learning rate: %e -- Effective learning rate: %e",
-            config.training.optimization.lr,
-            self.effective_lr,
-        )
-
         self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
@@ -115,6 +103,11 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_rank = 0
         self.ens_comm_subgroup_num_groups = 1
         self.ens_comm_subgroup_size = 1
+
+    def _num_model_replicas(self) -> int:
+        """Number of ensemble groups that train side by side, each on its own batch."""
+        hardware = self.config.system.hardware
+        return hardware.num_nodes * hardware.num_gpus_per_node // hardware.num_gpus_per_ensemble
 
     def set_ens_comm_group(
         self,

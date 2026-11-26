@@ -518,20 +518,17 @@ Anemoi training uses the ``CosineLRScheduler`` from ``timm`` as its
 default learning rate scheduler. Docs for this scheduler can be found here
 https://github.com/huggingface/pytorch-image-models/blob/main/timm/scheduler/cosine_lr.py
 The user can configure the maximum learning rate by setting
-``config.training.optimization.lr``. Note that this learning rate is
-the local (per-GPU) rate; it is scaled by the number of GPUs at
-runtime with:
-
-.. code:: yaml
-
-   global_learning_rate = config.training.optimization.lr * num_gpus_per_node * num_nodes / gpus_per_model
+``config.training.optimization.learning_rate``, or
+``config.training.optimization.learning_rate_per_replica``, which is
+multiplied by the number of model replicas (see
+:doc:`../modules/optimization`).
 
 The user can also control the rate at which the learning rate decreases
 by setting the total number of scheduler steps -
 ``config.training.optimization.lr_scheduler.t_initial`` and the minimum
 learning rate reached -
-``config.training.optimization.lr_scheduler.lr_min``. Note that the
-minimum learning rate is not scaled by the number of GPUs. The user can
+``config.training.optimization.learning_rate_minimum`` or
+``config.training.optimization.learning_rate_per_replica_minimum``. The user can
 also control the warmup period by setting
 ``config.training.optimization.lr_scheduler.warmup_t``. If the warmup
 period is set to 0, the learning rate will start at the maximum

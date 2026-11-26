@@ -30,10 +30,8 @@ batch_size:
 # ============
 # Default effective batch_size for training is 16
 # For the o96 resolution, default per-gpu batch_size is 2 (8 gpus required)
-# The global lr is calculated as:
-# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
-# Assuming a constant effective batch_size, any change in the per_gpu batch_size
-# should come with a rescaling of the local_lr to keep a constant global_lr
+# Changing the effective batch_size may call for a different
+# training.optimization.learning_rate
 # ============
 
 # runs only N training batches [N = integer | null]

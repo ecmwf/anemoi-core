@@ -26,7 +26,7 @@ parts:
        └── cosine_scheduler.yaml  # default scheduler (timm CosineLRScheduler)
 
 The top-level ``default.yaml`` selects sub-configs through Hydra's
-defaults list and sets the learning rate and Lightning scheduler
+defaults list and sets the learning rates and Lightning scheduler
 integration options:
 
 .. code:: yaml
@@ -36,7 +36,10 @@ integration options:
      - lr_scheduler: cosine_scheduler
      - _self_
 
-   lr: 0.625e-4  # local_lr — scaled by hardware config at runtime
+   learning_rate: 1.0e-3
+   learning_rate_per_replica: null
+   learning_rate_minimum: 3.0e-7
+   learning_rate_per_replica_minimum: null
 
    # Lightning scheduler integration settings.
    # See https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
@@ -61,11 +64,47 @@ config group. The default is AdamW:
    _target_: torch.optim.AdamW
    betas: [0.9, 0.95]
 
-The learning rate is set separately via ``config.training.optimization.lr``
-and is not part of the optimizer config. At runtime, ``BaseGraphModule``
-computes an effective LR by scaling ``optimization.lr`` by the total
-number of GPUs divided by the number of GPUs per model, and passes
-that as the ``lr`` argument when instantiating the optimizer.
+The learning rate is set separately in ``config.training.optimization``
+and is not part of the optimizer config. There are two learning rates,
+each set with one of two keys:
+
+-  the peak learning rate, reached at the end of the scheduler's
+   warmup: ``learning_rate`` or ``learning_rate_per_replica``.
+-  the minimum learning rate the scheduler decays to:
+   ``learning_rate_minimum`` or ``learning_rate_per_replica_minimum``.
+
+``learning_rate`` and ``learning_rate_minimum`` are used as they are.
+``learning_rate_per_replica`` and ``learning_rate_per_replica_minimum``
+are multiplied by the number of model replicas, the model copies that
+train side by side, each on its own batch:
+
+.. code::
+
+   num_model_replicas = num_nodes * num_gpus_per_node / num_gpus_per_model
+
+For ensemble training, ``num_gpus_per_ensemble`` takes the place of
+``num_gpus_per_model``. Keeping a per-replica value fixed makes the
+learning rate grow with the number of GPUs, in step with the effective
+batch size.
+
+Set one key of each pair and the other to ``null``. The two pairs can be
+mixed, for example a peak learning rate for the whole run with a
+per-replica minimum:
+
+.. code:: yaml
+
+   training:
+     optimization:
+       learning_rate: 1.0e-3
+       learning_rate_per_replica: null
+       learning_rate_minimum: null
+       learning_rate_per_replica_minimum: 3.0e-8
+
+The peak learning rate is required. ``BaseGraphModule`` passes it as the
+``lr`` argument when instantiating the optimizer. The minimum learning
+rate is passed to the scheduler as its ``lr_min`` argument. Set both
+minimum keys to ``null`` for a scheduler that takes no ``lr_min``, and
+give its minimum in the scheduler config instead.
 
 To override the optimizer at the command line:
 
@@ -95,7 +134,6 @@ The default is ``CosineLRScheduler`` from ``timm.scheduler``:
 
    # optimization/lr_scheduler/cosine_scheduler.yaml
    _target_: timm.scheduler.CosineLRScheduler
-   lr_min: 3e-7
    t_initial: ${training.max_steps}
    warmup_t: 1000
    t_in_epochs: false  # t_initial and warmup_t are in steps, not epochs

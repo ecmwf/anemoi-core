@@ -63,11 +63,11 @@ training:
           _target_: anemoi.training.losses.scalers.StdevTendencyScaler
           timestep: ${task.output_timestep}
   optimization:
-    lr: 5.0e-5
+    learning_rate: 5.0e-5
+    learning_rate_minimum: 3.0e-7
     lr_scheduler:
       warmup_t: 1000
       t_initial: 150000
-      lr_min: 3e-7
   ensemble_size_per_device: 1
   training_loss:
     datasets:

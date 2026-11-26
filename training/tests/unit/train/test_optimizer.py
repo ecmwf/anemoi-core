@@ -16,6 +16,8 @@ from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.base import resolve_learning_rates
+from anemoi.training.train.methods.ensemble import EnsembleTraining
 
 _ADAM_CFG = OmegaConf.create({"_target_": "torch.optim.Adam", "betas": [0.9, 0.95], "weight_decay": 0.1})
 
@@ -25,8 +27,9 @@ def mocked_module(mocker: MockerFixture) -> BaseTrainingModule:
     """Create a lightweight mock BaseTrainingModule instance with real methods bound."""
     module = mocker.MagicMock(spec=BaseTrainingModule)
 
-    module.effective_lr = 0.001
     module.parameters.return_value = [torch.nn.Parameter(torch.randn(2, 2))]
+    module.learning_rate = 0.001
+    module.learning_rate_minimum = None
 
     # Default config: no scheduler
     module.config = mocker.MagicMock()
@@ -53,7 +56,7 @@ def test_create_optimizer_from_config(mocked_module: BaseTrainingModule) -> None
 
     assert isinstance(result, torch.optim.Adam)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.learning_rate)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95)
 
@@ -71,7 +74,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseTrainingModule
 
     assert isinstance(result, torch.optim.Optimizer)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.learning_rate)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95, 0.9999)
 
@@ -131,11 +134,99 @@ def test_create_timm_scheduler_defaults_to_step_interval(
     assert scheduler_dict["interval"] == "step"
 
 
+def test_scheduler_gets_minimum_learning_rate(mocked_module: BaseTrainingModule) -> None:
+    mocked_module.learning_rate_minimum = 2e-6
+    mocked_module.config.training.optimization.optimizer = _ADAM_CFG
+    mocked_module.config.training.optimization.lr_scheduler = OmegaConf.create(
+        {"_target_": "timm.scheduler.CosineLRScheduler", "t_initial": 1000, "warmup_t": 100},
+    )
+    mocked_module.config.training.optimization.pl_lr_scheduler = OmegaConf.create({"interval": "step"})
+
+    _, schedulers = mocked_module.configure_optimizers()
+
+    assert schedulers[0]["scheduler"].lr_min == pytest.approx(2e-6)
+
+
+def test_scheduler_rejects_minimum_set_twice(mocked_module: BaseTrainingModule) -> None:
+    mocked_module.learning_rate_minimum = 2e-6
+    mocked_module.config.training.optimization.optimizer = _ADAM_CFG
+    mocked_module.config.training.optimization.lr_scheduler = OmegaConf.create(
+        {"_target_": "timm.scheduler.CosineLRScheduler", "lr_min": 1e-5, "t_initial": 1000},
+    )
+
+    with pytest.raises(ValueError, match="lr_min"):
+        mocked_module.configure_optimizers()
+
+
+def _optimization_config(**learning_rates: float | None) -> OmegaConf:
+    keys = ("learning_rate", "learning_rate_per_replica", "learning_rate_minimum", "learning_rate_per_replica_minimum")
+    return OmegaConf.create({key: learning_rates.get(key) for key in keys})
+
+
+@pytest.mark.parametrize(
+    ("learning_rates", "expected"),
+    [
+        ({"learning_rate": 1e-3, "learning_rate_minimum": 1e-6}, (1e-3, 1e-6)),
+        ({"learning_rate_per_replica": 1e-4, "learning_rate_per_replica_minimum": 1e-7}, (4e-4, 4e-7)),
+        ({"learning_rate": 1e-3, "learning_rate_per_replica_minimum": 1e-7}, (1e-3, 4e-7)),
+        ({"learning_rate_per_replica": 1e-4, "learning_rate_minimum": 1e-6}, (4e-4, 1e-6)),
+        ({"learning_rate": 1e-3}, (1e-3, None)),
+    ],
+)
+def test_resolve_learning_rates(learning_rates: dict, expected: tuple[float, float | None]) -> None:
+    peak, minimum = resolve_learning_rates(_optimization_config(**learning_rates), num_model_replicas=4)
+
+    assert peak == pytest.approx(expected[0])
+    assert minimum == (None if expected[1] is None else pytest.approx(expected[1]))
+
+
+@pytest.mark.parametrize(
+    "learning_rates",
+    [
+        {"learning_rate": 1e-3, "learning_rate_per_replica": 1e-4},
+        {"learning_rate": 1e-3, "learning_rate_minimum": 1e-6, "learning_rate_per_replica_minimum": 1e-7},
+    ],
+)
+def test_resolve_learning_rates_rejects_both_keys_of_a_pair(learning_rates: dict) -> None:
+    with pytest.raises(ValueError, match="Set one of them and the other to null"):
+        resolve_learning_rates(_optimization_config(**learning_rates), num_model_replicas=4)
+
+
+def test_resolve_learning_rates_requires_peak() -> None:
+    with pytest.raises(ValueError, match="learning_rate_per_replica"):
+        resolve_learning_rates(_optimization_config(learning_rate_minimum=1e-6), num_model_replicas=4)
+
+
+@pytest.mark.parametrize(
+    ("module_class", "expected"),
+    [(BaseTrainingModule, 8), (EnsembleTraining, 4)],
+)
+def test_num_model_replicas(mocker: MockerFixture, module_class: type, expected: int) -> None:
+    module = mocker.MagicMock(spec=module_class)
+    module.config = OmegaConf.create(
+        {
+            "system": {
+                "hardware": {
+                    "num_nodes": 2,
+                    "num_gpus_per_node": 8,
+                    "num_gpus_per_model": 2,
+                    "num_gpus_per_ensemble": 4,
+                },
+            },
+        },
+    )
+
+    assert module_class._num_model_replicas(module) == expected
+
+
 def test_lr_scheduler_step_uses_step_update_for_step_interval(
     mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
-    optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.effective_lr)
+    optimizer = torch.optim.Adam(
+        mocked_module.parameters(),
+        lr=mocked_module.learning_rate,
+    )
     scheduler = CosineLRScheduler(optimizer, t_initial=1000, warmup_t=100, t_in_epochs=False)
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")
@@ -152,7 +243,10 @@ def test_lr_scheduler_step_uses_epoch_step_for_epoch_interval(
     mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
-    optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.effective_lr)
+    optimizer = torch.optim.Adam(
+        mocked_module.parameters(),
+        lr=mocked_module.learning_rate,
+    )
     scheduler = CosineLRScheduler(optimizer, t_initial=10, warmup_t=1, t_in_epochs=True)
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")

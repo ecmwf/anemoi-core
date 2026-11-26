@@ -97,6 +97,71 @@ def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
             resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
+def resolve_learning_rates(optimization_config: Any, num_model_replicas: int) -> tuple[float, float | None]:
+    """Work out the peak and minimum learning rates for the whole run.
+
+    Each of the two is set in the config in one of two ways: for the whole run
+    (``learning_rate``, ``learning_rate_minimum``), or per model replica
+    (``learning_rate_per_replica``, ``learning_rate_per_replica_minimum``). A
+    per-replica value is multiplied by the number of model replicas. The peak is
+    required; the minimum may be left unset.
+
+    Parameters
+    ----------
+    optimization_config : Any
+        The ``training.optimization`` config.
+    num_model_replicas : int
+        Number of model copies that train side by side, each on its own batch.
+
+    Returns
+    -------
+    tuple[float, float | None]
+        Peak learning rate, and the minimum learning rate or None when it is not set.
+    """
+    peak = _learning_rate_for_run(
+        optimization_config,
+        "learning_rate",
+        "learning_rate_per_replica",
+        num_model_replicas,
+    )
+    if peak is None:
+        msg = "Set training.optimization.learning_rate or training.optimization.learning_rate_per_replica."
+        raise ValueError(msg)
+    minimum = _learning_rate_for_run(
+        optimization_config,
+        "learning_rate_minimum",
+        "learning_rate_per_replica_minimum",
+        num_model_replicas,
+    )
+    LOGGER.info(
+        "Learning rate for %d model replicas: peak %.3e, minimum %s",
+        num_model_replicas,
+        peak,
+        "not set" if minimum is None else f"{minimum:.3e}",
+    )
+    return peak, minimum
+
+
+def _learning_rate_for_run(
+    optimization_config: Any,
+    run_key: str,
+    replica_key: str,
+    num_model_replicas: int,
+) -> float | None:
+    """Read one learning rate given either for the whole run or per model replica."""
+    run_value = getattr(optimization_config, run_key, None)
+    replica_value = getattr(optimization_config, replica_key, None)
+    if run_value is not None and replica_value is not None:
+        msg = (
+            f"Both training.optimization.{run_key} and training.optimization.{replica_key} are set. "
+            "Set one of them and the other to null."
+        )
+        raise ValueError(msg)
+    if replica_value is not None:
+        return replica_value * num_model_replicas
+    return run_value
+
+
 class BaseTrainingModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
@@ -345,11 +410,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.is_first_step = True
 
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        self.effective_lr = (
-            config.system.hardware.num_nodes
-            * config.system.hardware.num_gpus_per_node
-            * config.training.optimization.lr
-            / config.system.hardware.num_gpus_per_model
+        self.learning_rate, self.learning_rate_minimum = resolve_learning_rates(
+            config.training.optimization,
+            self._num_model_replicas(),
         )
         self.model_comm_group = None
         self.reader_groups = None
@@ -1359,19 +1422,34 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.trainer.datamodule.set_epoch(self.current_epoch + 1)
         super().on_train_epoch_end()
 
+    def _num_model_replicas(self) -> int:
+        """Number of model copies that train side by side, each on its own batch."""
+        hardware = self.config.system.hardware
+        return hardware.num_nodes * hardware.num_gpus_per_node // hardware.num_gpus_per_model
+
     def configure_optimizers(
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.learning_rate)
         self.log_optimizer(optimizer)
 
-        if not getattr(optimization_config, "lr_scheduler", None):
+        lr_scheduler_config = getattr(optimization_config, "lr_scheduler", None)
+        if not lr_scheduler_config:
             return optimizer
 
-        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        scheduler_kwargs = {}
+        if self.learning_rate_minimum is not None:
+            if "lr_min" in lr_scheduler_config:
+                msg = (
+                    "training.optimization.lr_scheduler.lr_min clashes with the minimum learning rate set in "
+                    "training.optimization. Set the minimum in one place only."
+                )
+                raise ValueError(msg)
+            scheduler_kwargs["lr_min"] = self.learning_rate_minimum
+        scheduler = instantiate(lr_scheduler_config, optimizer=optimizer, **scheduler_kwargs)
         return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
     @staticmethod

@@ -3,7 +3,18 @@ defaults:
   - lr_scheduler: cosine_scheduler
   - _self_
 
-lr: 0.625e-4 # local_lr — scaled by hardware config at runtime
+# Peak learning rate, reached at the end of the scheduler's warmup, and the
+# minimum learning rate the scheduler decays to (passed to it as lr_min).
+# Each is set either for the whole run, or per model replica with the
+# *_per_replica keys. A per-replica value is multiplied by the number of model
+# replicas: num_nodes * num_gpus_per_node / num_gpus_per_model, or
+# / num_gpus_per_ensemble for ensemble training.
+# Set one key of each pair and the other to null. The minimum may also be left
+# null on both keys, so the scheduler's own default applies.
+learning_rate: 1.0e-3
+learning_rate_per_replica: null
+learning_rate_minimum: 3.0e-7
+learning_rate_per_replica_minimum: null
 
 # Lightning scheduler integration: controls how Lightning calls the scheduler
 # during training (step vs epoch, metric to monitor for ReduceLROnPlateau, etc.).
