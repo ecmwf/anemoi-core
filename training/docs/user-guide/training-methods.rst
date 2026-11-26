@@ -33,15 +33,15 @@ The three built-in methods are:
         ensemble_size_per_device: 4
 
 ``TransportTraining`` (``anemoi.training.train.methods.transport``)
-   Configurable transport training for EDM diffusion and stochastic-interpolant
-   probabilistic forecasters. Use ``training.prediction_mode`` to select
-   state or tendency targets, and ``training.transport_objective`` to
-   select ``edm_diffusion`` or ``stochastic_interpolant``.
+   Configurable transport training for EDM diffusion and flow-matching
+   probabilistic forecasters. The model config sets the objective
+   (``model.model.transport.objective``: ``edm_diffusion`` or
+   ``flow_matching``), and the model class sets state or tendency targets.
 
 .. note::
 
    ``EnsembleTraining`` and transport objectives such as EDM diffusion or
-   stochastic interpolants require the GNN model type to be replaced with a
+   flow matching require the GNN model type to be replaced with a
    compatible architecture (e.g. GraphTransformer). The plain GNN
    processor is not supported for these methods.
 
@@ -279,13 +279,13 @@ A typical config file for CRPS training is:
 Transport training covers probabilistic objectives that corrupt an
 endpoint and train a model to recover either the clean endpoint or the
 transport vector field. The supported objectives are ``edm_diffusion`` and
-``stochastic_interpolant``.
+``flow_matching``.
 
 Use :class:`~anemoi.training.train.methods.transport.TransportTraining`
-with ``prediction_mode: state`` for state-space targets or
-``prediction_mode: tendency`` for tendency-space targets. The model must
-use :class:`AnemoiTransportModelEncProcDec` or
-:class:`AnemoiTransportTendModelEncProcDec`.
+with :class:`AnemoiTransportModelEncProcDec`, which learns future states, or
+:class:`AnemoiTransportTendModelEncProcDec`, which learns tendencies from the
+latest input state. Each model class declares this as its
+``prediction_mode``, and training prepares its targets to match.
 
 .. warning::
 
@@ -296,179 +296,118 @@ Top-level configs
 
 The transport entry points are:
 
--  ``transport_edm_diffusion.yaml``
--  ``transport_edm_diffusion_tendency.yaml``
--  ``transport_stochastic_interpolant.yaml``
--  ``transport_stochastic_interpolant_tendency.yaml``
+-  ``transport.yaml``: one dataset, EDM diffusion;
+-  ``multi_transport.yaml``: two datasets (``era5`` and ``cerra``) trained
+   together, EDM diffusion;
+-  ``transport_flow_matching.yaml``: one dataset, flow matching.
 
-These configs select ``training: edm_diffusion`` or
-``training: stochastic_interpolant`` and set the corresponding
-``training.transport_objective``. Tendency variants additionally select
-``prediction_mode: tendency`` and a tendency model config.
+They select the state model, ``graphtransformer_transport`` (or
+``graphtransformer_multi_transport``). The tendency model is chosen with an
+override:
 
-The entry points select objective-specific model configs such as
-``graphtransformer_transport_edm``, ``graphtransformer_transport_si``,
-``graphtransformer_transport_tendency_edm``, and
-``graphtransformer_transport_tendency_si``. Transformer variants use the
-same ``_edm`` and ``_si`` suffixes.
+.. code:: bash
+
+   anemoi-training train --config-name=transport model=graphtransformer_transport_tendency
+   anemoi-training train --config-name=multi_transport model=graphtransformer_multi_transport_tendency
+
+Each entry config sets everything that depends on the objective, in the
+model config and in the training config:
+
+.. code:: yaml
+
+   # transport.yaml (after its defaults list)
+   model:
+     model:
+       transport:
+         objective: edm_diffusion
+         inference_defaults:
+           sampling_schedule:
+             schedule_type: karras
+             sigma_max: 100.0
+             sigma_min: 0.02
+             rho: 7.0
+             num_steps: 50
+           sampler:
+             sampler: heun
+
+   training:
+     transport:
+       training_condition:
+         distribution: karras
+         sigma_max: 100.0
+         sigma_min: 0.02
+         rho: 7.0
+
+The flow-matching entry config sets ``objective: flow_matching``, a
+``unit_time`` sampling schedule and ``training_condition.distribution:
+uniform_time``. Flow-matching time runs from 0 to 1, so it also sets the
+noise embedder's ``scale: 1000``: the embedding frequencies then run from
+1000 down to about 1.5 radians per unit of time. Config validation rejects
+a ``training_condition`` that does not suit the model's objective.
 
 Model configuration
 ===================
 
-Objective-specific model configs put transport settings under
-``model.model.transport``:
+The model configs are the same for both objectives and put the transport
+settings under ``model.model.transport``:
 
 .. code:: yaml
 
    model:
      _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
      transport:
-       objective: edm_diffusion
        sigma_data: 1.0
-       sigma_max: 100.0
-       sigma_min: 0.02
-       rho: 7.0
-       training_condition:
-         distribution: karras
-         sigma_max: ${model.model.transport.sigma_max}
-         sigma_min: ${model.model.transport.sigma_min}
-         rho: ${model.model.transport.rho}
+       noise_channels: 32
+       noise_cond_dim: 16
        noise_embedder:
          _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
          num_channels: ${model.model.transport.noise_channels}
          max_period: 1000
-       source:
-         kind: default
-         scale: 1.0
-         noise_scale: 0.0
 
-For ``objective: edm_diffusion``, ``source.kind: default`` resolves to
-``gaussian``. This is the recommended source for standard EDM sampling
-and training.
+``graphtransformer_transport_tendency`` loads ``graphtransformer_transport``
+and switches to :class:`AnemoiTransportTendModelEncProcDec`, with a skip
+connection from the latest input state. Both objectives start from Gaussian
+noise.
 
-For stochastic interpolants, set ``objective: stochastic_interpolant``
-and configure the interpolant schedules:
+Flow matching
+=============
 
-.. code:: yaml
-
-   model:
-     model:
-       transport:
-         objective: stochastic_interpolant
-         si_alpha_schedule: linear
-         si_beta_schedule: linear
-         si_sigma_schedule: brownian_bridge
-         si_noise_scale: 1.0
-         training_condition:
-           distribution: uniform_time
-         source:
-           kind: gaussian
-
-The available source kinds are ``zero``, ``gaussian``, and
-``reference_state``. ``default`` resolves to the objective's default
-source at training or sampling time. ``scale`` multiplies the source, and
-``noise_scale`` adds additional additive Gaussian noise after the source
-is built.
-
-Stochastic-interpolant parameters
-=================================
-
-The stochastic-interpolant bridge combines a source endpoint, target
-endpoint, and optional bridge noise:
+Flow matching follows a straight path from Gaussian noise to the training
+target. The noisy target the model sees at time ``t`` is
 
 .. math::
 
-   x_s = \alpha(s) x_0 + \beta(s) x_1 + \sigma(s) \epsilon
+   x_t = (1 - t) x_0 + t x_1
 
-where ``x_0`` is the selected ``source``, ``x_1`` is the training
-target, and ``epsilon`` is standard Gaussian bridge noise.
+where ``x_0`` is the noise, ``x_1`` is the training target and ``t`` is
+drawn uniformly between 0 and 1. The model learns the velocity
+``x_1 - x_0``.
 
--  ``si_alpha_schedule`` controls the source coefficient. Currently,
-   ``linear`` gives ``alpha(s) = 1 - s``.
--  ``si_beta_schedule`` controls the target coefficient. ``linear``
-   gives ``beta(s) = s`` and ``quadratic`` gives ``beta(s) = s^2``.
--  ``si_sigma_schedule`` controls the bridge-noise coefficient.
-   ``brownian_bridge`` gives
-   ``sigma(s) = si_noise_scale * sqrt(2 * s * (1 - s))``.
-   The option ``quadratic_bridge`` gives
-   ``sigma(s) = si_noise_scale * s * (1 - s)``, which is zero at
-   both endpoints and has a finite derivative there.
--  ``si_noise_scale`` scales the stochastic bridge noise. Set it to
-   ``0.0`` for a deterministic bridge.
--  ``source.noise_scale`` is separate from bridge noise. It adds
-   additional additive Gaussian noise to the source endpoint before the
-   bridge is built.
+Sampling integrates that velocity from ``t = 0`` to ``t = 1`` with an ODE
+sampler such as ``euler`` or ``heun``. The sampler itself adds no noise:
+ensemble members differ because each one starts from its own Gaussian
+noise.
 
-Flow-matching-like setup
-===============================================
-
-A flow-matching-like training can be set up as a
-stochastic interpolant with a Gaussian source, linear endpoint schedules,
-and no bridge noise:
-
-.. code:: yaml
-
-   training:
-     transport_objective: stochastic_interpolant
-
-   model:
-     model:
-       transport:
-         objective: stochastic_interpolant
-         si_alpha_schedule: linear
-         si_beta_schedule: linear
-         si_sigma_schedule: brownian_bridge
-         si_noise_scale: 0.0
-         training_condition:
-           distribution: uniform_time
-         source:
-           kind: gaussian
-           scale: 1.0
-           noise_scale: 0.0
-
-Stochastic-interpolant training learns the bridge velocity field. Use
-ODE samplers such as ``euler`` or ``heun`` for sampling. Score-corrected SDE
-sampling is currently not part of this objective.
+Validation metrics estimate the target in one step from the predicted
+velocity, ``x_t + (1 - t) v``, at the time drawn for that batch.
 
 Training configuration
 ======================
 
-The shared training base is ``training/transport.yaml``. Objective
-configs specialize it:
+The settings shared by all transport training (precision, gradient
+clipping, optimiser, training method) are in
+``training/transport_settings.yaml``. ``training/transport.yaml`` puts them
+on top of ``single.yaml`` for one dataset and ``training/multi_transport.yaml``
+on top of ``multi.yaml`` for several. The entry config adds
+``training.transport.training_condition``, the distribution of the noise
+level or time drawn during training (see above).
 
-.. code:: yaml
-
-   # training/edm_diffusion.yaml
-   defaults:
-     - transport
-     - _self_
-
-   transport_objective: edm_diffusion
-
-   training_loss:
-     datasets:
-       data:
-         _target_: anemoi.training.losses.WeightedMSELoss
-
-.. code:: yaml
-
-   # training/stochastic_interpolant.yaml
-   defaults:
-     - transport
-     - _self_
-
-   transport_objective: stochastic_interpolant
-
-   training_loss:
-     datasets:
-       data:
-         _target_: anemoi.training.losses.MSELoss
-
-EDM diffusion uses a weighted clean-endpoint objective. Stochastic
-interpolants train the drift/vector field between the selected source
-and target endpoints. With a Gaussian source and ``si_noise_scale: 0``,
-the stochastic-interpolant objective is the deterministic bridge case
-commonly sampled with ODE solvers such as Euler or Heun.
+Both objectives train with the ``MSELoss`` of ``single.yaml`` and
+``multi.yaml``. EDM diffusion weights each sample's loss by its noise level,
+so its training loss must apply these weights; ``MSELoss`` and the other
+pointwise losses do, and a loss that would leave them unused is rejected when
+training starts. Flow matching trains the velocity between the noise and the
+target.
 
 Sampling defaults
 =================
@@ -490,6 +429,11 @@ Default sampler settings live under
 
 These defaults can be overridden at inference time with
 ``schedule_params`` and ``sampler_params`` passed to ``predict_step``.
-For stochastic interpolants, use the same structure with
+An override of the same ``schedule_type`` or ``sampler`` (or one that names
+none) changes only the settings it gives. An override that names another
+type replaces the defaults and must give that type's own settings, for
+example ``{"schedule_type": "linear", "sigma_max": 100.0, "sigma_min": 0.02,
+"num_steps": 20}``; a setting the new type does not take is an error.
+For flow matching, use the same structure with
 ``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
 such as ``heun`` or ``euler``.

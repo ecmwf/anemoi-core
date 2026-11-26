@@ -1,10 +1,6 @@
 ---
+# Transport training on several datasets: the settings of multi.yaml with the transport settings on top.
 defaults:
   - multi
+  - transport_settings
   - _self_
-
-method:
-  _target_: anemoi.training.train.methods.TransportTraining
-transport:
-  prediction_mode: state
-  objective: edm_diffusion

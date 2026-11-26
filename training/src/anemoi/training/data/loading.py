@@ -11,17 +11,20 @@ from abc import ABC
 from abc import abstractmethod
 from collections import Counter
 from collections.abc import Iterator
+from collections.abc import Mapping
+from collections.abc import Sequence
 
 import numpy as np
+from rich.console import Console
+from rich.tree import Tree
 from torch.utils.data import ConcatDataset
 from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import DataReader
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.time_indices import TimeIndices
@@ -40,7 +43,7 @@ class DataLoadingPolicy(ABC):
     @abstractmethod
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
@@ -49,7 +52,7 @@ class DataLoadingPolicy(ABC):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data readers.
         relative_date_indices : dict[str, TimeIndices]
             Precomputed relative date indices for each data reader.
@@ -114,6 +117,64 @@ class DataLoadingPolicy(ABC):
         """Check compatibility requirements specific to this loading policy."""
         del dataset, options
 
+    def co_loaded_datasets(self, dataset_names: Sequence[str]) -> list[frozenset[str]]:
+        """Groups of datasets that can appear together in one batch.
+
+        The default assumes every dataset can share a batch with every other, which is the
+        strictest answer for checks that depend on it; policies that split datasets across
+        batches override it.
+
+        Parameters
+        ----------
+        dataset_names : Sequence[str]
+            Names of the datasets this policy loads.
+
+        Returns
+        -------
+        list[frozenset[str]]
+            Every batch holds datasets from a single group.
+        """
+        return [frozenset(dataset_names)]
+
+    def check_encoder_fusion(self, encoders: Mapping[str, Mapping], dataset_names: Sequence[str]) -> None:
+        """Check that no 'none' encoder can receive several of its source datasets in one batch.
+
+        An encoder with ``dataset_fusing_strategy: "none"`` does not fuse, so it may list several
+        ``source_datasets`` only if no batch holds more than one of them (e.g. multi-domain
+        training). The model enforces this per batch; this check catches it before the model is built.
+
+        Parameters
+        ----------
+        encoders : Mapping[str, Mapping]
+            The ``model.encoders`` config, keyed by encoder name.
+        dataset_names : Sequence[str]
+            Names of the datasets this policy loads.
+
+        Raises
+        ------
+        ValueError
+            If a batch can hold two or more source datasets of a 'none' encoder.
+        """
+        groups = self.co_loaded_datasets(dataset_names)
+        for encoder_name, encoder_config in encoders.items():
+            if encoder_config.get("dataset_fusing_strategy", "none") != "none":
+                continue
+            sources = list(encoder_config.get("source_datasets", []))
+            for group in groups:
+                together = [name for name in sources if name in group]
+                if len(together) > 1:
+                    msg = (
+                        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', but with "
+                        f"{type(self).__name__} its source datasets {together} are loaded into the same "
+                        "batch. 'none' does not fuse: it encodes one source dataset per batch, so several "
+                        "source_datasets are only valid when the loading policy puts them in separate "
+                        "batches (e.g. MultiDomainLoadingPolicy).\n"
+                        "    To encode them together, set\n"
+                        f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
+                        f"    with a model.encoders.{encoder_name}.node_embedder block, or give them separate encoders."
+                    )
+                    raise ValueError(msg)
+
 
 class SynchronizedLoadingPolicy(DataLoadingPolicy):
     """Default policy: one synchronized dataset and a distributed sampler split into batches.
@@ -124,7 +185,7 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
 
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
@@ -161,33 +222,47 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
 
 
 class MultiDomainDataset(ConcatDataset):
-    """Concatenated domains exposing the dataset metadata used by Anemoi."""
+    """Concatenated domains, each a :class:`MultiDataset`, exposing the dataset metadata used by Anemoi.
+
+    Every domain reads its own datasets, so the per-dataset properties below are the union of the
+    domains' readers, the same mappings a single :class:`MultiDataset` over all readers would give.
+    """
 
     def __init__(self, datasets: list[MultiDataset]) -> None:
         super().__init__(datasets)
         self.data_readers = {name: reader for dataset in datasets for name, reader in dataset.data_readers.items()}
+        self.dataset_names = list(self.data_readers)
 
-    # TODO(dieter): the properties below duplicate MultiDataset's reader-collecting properties;
-    # extract them into a mixin shared by MultiDataset and MultiDomainDataset.
+    def _collect(self, attr_name: str) -> dict:
+        return {name: getattr(reader, attr_name) for name, reader in self.data_readers.items()}
+
     @property
     def statistics(self) -> dict:
-        return {name: reader.statistics for name, reader in self.data_readers.items()}
+        return self._collect("statistics")
 
     @property
     def metadata(self) -> dict:
-        return {name: reader.metadata for name, reader in self.data_readers.items()}
+        return self._collect("metadata")
 
     @property
     def supporting_arrays(self) -> dict:
-        return {name: reader.supporting_arrays for name, reader in self.data_readers.items()}
+        return self._collect("supporting_arrays")
 
     @property
     def data(self) -> dict:
-        return {name: reader.data for name, reader in self.data_readers.items()}
+        return self._collect("data")
+
+    @property
+    def variables(self) -> dict[str, list[str]]:
+        return self._collect("variables")
 
     @property
     def name_to_index(self) -> dict:
-        return {name: reader.name_to_index for name, reader in self.data_readers.items()}
+        return self._collect("name_to_index")
+
+    @property
+    def resolution(self) -> dict[str, str]:
+        return self._collect("resolution")
 
     def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         for dataset in self.datasets:
@@ -196,9 +271,21 @@ class MultiDomainDataset(ConcatDataset):
             )
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def set_reader_group_info(self, reader_group_rank: int, shard_sizes: dict[str, ShardSizes]) -> None:
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         for dataset in self.datasets:
-            dataset.set_reader_group_info(reader_group_rank, shard_sizes)
+            dataset.set_reader_group_info(reader_group_rank, reader_group_size)
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self) -> Tree:
+        tree = Tree(self.__class__.__name__)
+        for dataset in self.datasets:
+            tree.add(dataset.tree())
+        return tree
 
 
 class MultiDomainLoadingPolicy(DataLoadingPolicy):
@@ -206,7 +293,7 @@ class MultiDomainLoadingPolicy(DataLoadingPolicy):
 
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
@@ -241,6 +328,10 @@ class MultiDomainLoadingPolicy(DataLoadingPolicy):
             batch_size=batch_size,
             drop_last=drop_last,
         )
+
+    def co_loaded_datasets(self, dataset_names: Sequence[str]) -> list[frozenset[str]]:
+        """Each dataset is its own domain, and batches never mix domains."""
+        return [frozenset({name}) for name in dataset_names]
 
     def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
         check_datasets_variables_order(dataset.name_to_index)
