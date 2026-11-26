@@ -66,6 +66,8 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
+    ANEMOI_MODEL_DIS_ENC_PROC_DEC = "anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec"
+    ANEMOI_MODEL_DIS_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelDisentangledEncProcDec"
 
 
 class Model(BaseModel):
@@ -404,10 +406,16 @@ class HierarchicalModelSchema(BaseModelSchema):
         return data
 
 
+class DisentangledModelSchema(BaseModelSchema):
+    latent_blender: Optional[dict] = Field(default=None)
+    "Mapper config of the latent blender. Defaults to the mapper config of the first encoder."
+
+
 ModelSchema = Union[
     BaseModelSchema,
     EnsModelSchema,
     HierarchicalModelSchema,
+    DisentangledModelSchema,
     TransportModelSchema,
     TransportTendModelSchema,
 ]

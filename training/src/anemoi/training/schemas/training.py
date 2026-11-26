@@ -869,6 +869,11 @@ class SingleTrainingMethodSchema(BaseModel):
     "Hydra target for the single training method."
 
 
+class LatentRolloutTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.LatentRolloutTraining"] = Field(..., alias="_target_")
+    "Hydra target for single training with latent rollout."
+
+
 class EnsembleTrainingMethodSchema(BaseModel):
     target_: Literal["anemoi.training.train.methods.EnsembleTraining"] = Field(..., alias="_target_")
     "Hydra target for the ensemble training method."
@@ -886,6 +891,11 @@ def _training_method_discriminator(v: Any) -> str:
 
 class SingleTrainingSchema(BaseTrainingSchema):
     method: SingleTrainingMethodSchema
+    "Training method."
+
+
+class LatentRolloutTrainingSchema(BaseTrainingSchema):
+    method: LatentRolloutTrainingMethodSchema
     "Training method."
 
 
@@ -910,6 +920,7 @@ class TransportTrainingSchema(BaseTrainingSchema):
 
 TrainingSchema = Annotated[
     Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
+    | Annotated[LatentRolloutTrainingSchema, Tag("anemoi.training.train.methods.LatentRolloutTraining")]
     | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
     | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
     Discriminator(_training_method_discriminator),
