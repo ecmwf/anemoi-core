@@ -63,9 +63,6 @@ class BloscSettings(Dataset):
         assert np.array_equal(np.frombuffer(codec.decode(codec.encode(value)), dtype=np.float32), value)
         return torch.tensor([int(numcodecs.blosc._get_use_threads()), numcodecs.blosc.get_nthreads()])
 
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        pass
-
 
 @pytest.mark.usefixtures("restore_blosc")
 @pytest.mark.parametrize("context", ["fork", "spawn"])

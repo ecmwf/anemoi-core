@@ -18,11 +18,16 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import field_validator
 from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.schemas.training import GenericSchema
+from anemoi.training.utils.hyperparameters import HYPERPARAMETERS_FOR_RESUME
+from anemoi.training.utils.hyperparameters import INIT_HYPERPARAMETERS
+from anemoi.training.utils.hyperparameters import OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
+from anemoi.training.utils.hyperparameters import REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -35,8 +40,8 @@ class GraphPlotFnSchema(GenericSchema):
     ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
     ``edge_trainable_modules``. See :class:`GraphPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in graph plot options
+    ---------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
@@ -53,8 +58,8 @@ class LossPlotFnSchema(GenericSchema):
     The ``_target_`` must resolve to a callable that accepts at minimum:
     ``loss`` and ``parameter_names``. See :class:`LossPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in loss plot options
+    --------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
@@ -167,8 +172,8 @@ class BatchOutputPlotFnSchema(GenericSchema):
     ``parameters``, ``x``, ``y_true``, ``y_pred``, ``latlons``.
     See :class:`BatchOutputPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in batch output plot options
+    ----------------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn``
@@ -342,12 +347,61 @@ class Debug(BaseModel):
     "Activate anomaly detection. This will detect and trace back NaNs/Infs, but slow down training."
 
 
-class CheckpointSchema(BaseModel):
+class CheckpointingSchema(BaseModel):
     save_frequency: int | None
     "Frequency at which to save the checkpoints."
     num_models_saved: int
     "Number of model checkpoint to save. Only the last num_models_saved checkpoints will be kept. \
             If set to -1, all checkpoints are kept"
+
+
+class CheckpointSchema(BaseModel):
+    every_n_minutes: CheckpointingSchema | None = None
+    "Checkpointing by time interval."
+    every_n_epochs: CheckpointingSchema | None = None
+    "Checkpointing by epoch frequency."
+    every_n_train_steps: CheckpointingSchema | None = None
+    "Checkpointing by training step frequency."
+    exclude_hyperparameters: list[str] = Field(default_factory=list)
+    "Init arguments of the training module not to store as hyperparameters in the checkpoint. \
+            Only 'graph_data' can be excluded; converting the checkpoint with \
+            `anemoi-training checkpoint inference` then requires the graph through --graph."
+
+    @field_validator("exclude_hyperparameters")
+    @classmethod
+    def check_exclude_hyperparameters(cls, names: list[str]) -> list[str]:
+        unknown = sorted(set(names) - INIT_HYPERPARAMETERS)
+        if unknown:
+            msg = (
+                f"Unknown hyperparameters {unknown} in exclude_hyperparameters. "
+                f"Choose from {sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)}."
+            )
+            raise ValueError(msg)
+
+        needed_for_resume = sorted(set(names) & HYPERPARAMETERS_FOR_RESUME)
+        if needed_for_resume:
+            msg = f"Hyperparameters {needed_for_resume} are needed to resume training and cannot be excluded."
+            raise ValueError(msg)
+
+        needed_for_conversion = sorted(set(names) & REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
+        if needed_for_conversion:
+            msg = (
+                f"Hyperparameters {needed_for_conversion} are needed by `anemoi-training checkpoint inference` "
+                "and cannot be excluded."
+            )
+            raise ValueError(msg)
+
+        optional_for_conversion = sorted(set(names) & set(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION))
+        for name in optional_for_conversion:
+            LOGGER.warning(
+                "Excluding '%s' from the checkpoint hyperparameters: conversion of the training checkpoint through "
+                "`anemoi-training checkpoint inference` will require '%s' to be supplied separately. "
+                "This can be done through the %s flag.",
+                name,
+                name,
+                OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION[name],
+            )
+        return names
 
 
 class WandbSchema(BaseModel):
@@ -560,7 +614,7 @@ class DiagnosticsSchema(BaseModel):
     "Print the memory summary."
     enable_checkpointing: bool
     "Allow model to save checkpoints."
-    checkpoint: dict[str, CheckpointSchema] = Field(default_factory=dict)
-    "Checkpoint schema for defined frequency (every_n_minutes, every_n_epochs, ...)."
+    checkpoint: CheckpointSchema = Field(default_factory=CheckpointSchema)
+    "Checkpoint settings: save frequencies (every_n_minutes, every_n_epochs, ...) and exclude_hyperparameters."
     check_val_every_n_epoch: PositiveInt = Field(default=1, example=1)
     "Run validation every n epochs."

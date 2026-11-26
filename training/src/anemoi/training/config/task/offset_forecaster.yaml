@@ -1,0 +1,16 @@
+_target_: anemoi.training.tasks.OffsetForecaster
+input_offsets: ["-6H", "0H"]
+output_offsets: ["6H"]
+
+# Rollout configuration for autoregressive forecasting
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  maximum: 1
+
+# set validation rollout length if more rollout is required in validation than
+# training, or set to null to follow the training rollout. Values below the
+# training rollout have no effect: validation always unrolls the training rollout.
+validation_rollout: null

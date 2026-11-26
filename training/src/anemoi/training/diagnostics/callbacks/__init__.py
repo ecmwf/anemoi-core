@@ -82,6 +82,11 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
         Diagnostics configuration (``config.diagnostics``).
     checkpoint_paths_cfg : DictConfig
         Checkpoint paths configuration (``config.system.output.checkpoints``).
+
+    Returns
+    -------
+    list[AnemoiCheckpoint]
+        Configured checkpoint callbacks, or an empty list when checkpointing is disabled.
     """
     if not diagnostics_cfg.enable_checkpointing:
         return []
@@ -93,7 +98,9 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
         "save_weights_only": False,
         "auto_insert_metric_name": False,
-        # save after every validation epoch, if we've improved
+        # Save after validation, before on_train_epoch_end advances the rollout
+        # and dataloader epoch. On resume, Lightning completes that hook before
+        # the first new training worker starts.
         "save_on_train_epoch_end": False,
         "enable_version_counter": False,
     }
@@ -101,6 +108,8 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
     ckpt_frequency_save_dict = {}
 
     for key, frequency_dict in diagnostics_cfg.checkpoint.items():
+        if key == "exclude_hyperparameters" or frequency_dict is None:
+            continue
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
         if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
@@ -240,9 +249,8 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     E.g.:
     ```
     callbacks:
-        - _target_: anemoi.training.diagnostics.callbacks.RolloutEval
-          rollout: 1
-          frequency: 12
+        - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
+          every_n_batches: 12
     ```
 
     Set `context.diagnostics.plot.callbacks` to a list of plot callback configurations.
@@ -301,7 +309,9 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # Progress bar callback
     trainer_callbacks.extend(_get_progress_bar_callback(diagnostics_cfg))
 
-    # Parent UUID callback
+    # ParentUUIDCallback only fires when Lightning loads the checkpoint (a warm start via
+    # ckpt_path since that's the only case where Lightning loads the file).
+    # For other scenarios, the checkpoint pipeline records lineage for its own loads in `runner.py`.
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(

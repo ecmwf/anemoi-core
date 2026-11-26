@@ -41,6 +41,10 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         ignore_nans: bool = False,
     ) -> None:
         super().__init__(loss=loss_fn, ignore_nans=ignore_nans)
+        # Each aggregate is scored one step at a time, so losses that span output steps cannot be used here.
+        if loss_fn.scores_across_time:
+            msg = "TimeAggregateLossWrapper cannot wrap a loss whose score spans several output steps."
+            raise ValueError(msg)
         self.time_aggregation_types = time_aggregation_types
 
     def forward(
@@ -82,9 +86,9 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         torch.Tensor
             Accumulated loss across all aggregation types.
         """
-        assert (
-            pred.shape[1] > 1
-        ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
+        assert pred.shape[1] > 1, (
+            "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
+        )
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         # Exclude the TIME scaler from inner loss calls since we iterate per-step

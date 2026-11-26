@@ -9,6 +9,7 @@
 
 
 import logging
+from contextlib import nullcontext
 from typing import Literal
 
 import einops
@@ -168,7 +169,7 @@ class CRPS(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "sum",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
@@ -178,10 +179,10 @@ class CRPS(BaseLoss):
         y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
 
-        if self.no_autocast:
-            with torch.amp.autocast(device_type=y_pred.device.type, enabled=False):
-                crps = self._kernel_crps(y_pred, y_target)
-        else:
+        context = (
+            torch.amp.autocast(device_type=y_pred.device.type, enabled=False) if self.no_autocast else nullcontext()
+        )
+        with context:
             crps = self._kernel_crps(y_pred, y_target)
 
         crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")

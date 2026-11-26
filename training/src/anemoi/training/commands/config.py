@@ -43,10 +43,19 @@ class ConfigGenerator(Command):
         generate = subparsers.add_parser(
             "generate",
             help=help_msg,
-            description=help_msg,
+            description=(
+                f"{help_msg} With --top-level-only, only the top-level YAML files are written. "
+                "Config groups are then loaded from the installed package, unless a file with the same "
+                "path already exists in the directory training is run from."
+            ),
         )
         generate.add_argument("--output", "-o", default=Path.cwd(), help="Output directory")
         generate.add_argument("--overwrite", "-f", action="store_true")
+        generate.add_argument(
+            "--top-level-only",
+            action="store_true",
+            help="Write only the root top-level config files, not the config group directories.",
+        )
 
         help_msg = "Validate the Anemoi training configs."
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
@@ -88,7 +97,7 @@ class ConfigGenerator(Command):
             LOGGER.info(
                 "Generating configs, please wait.",
             )
-            self.traverse_config(args.output)
+            self.traverse_config(args.output, top_level_only=args.top_level_only)
             return
 
         if args.subcommand == "validate":
@@ -113,7 +122,7 @@ class ConfigGenerator(Command):
             print(json.dumps(BaseSchema.model_json_schema(), indent=2))  # noqa: T201
             return
 
-    def traverse_config(self, destination_dir: Path | str) -> None:
+    def traverse_config(self, destination_dir: Path | str, *, top_level_only: bool = False) -> None:
         """Writes the given configuration data to the specified file path."""
         config_package = "anemoi.training.config"
 
@@ -123,7 +132,7 @@ class ConfigGenerator(Command):
 
         # Traverse through the package's config directory
         with pkg_resources.as_file(pkg_resources.files(config_package)) as config_path:
-            self.copy_files(config_path, destination_dir)
+            self.copy_files(config_path, destination_dir, top_level_only=top_level_only)
 
     @staticmethod
     def copy_file(item: Path, file_path: Path) -> None:
@@ -134,9 +143,10 @@ class ConfigGenerator(Command):
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
-    def copy_files(self, source_directory: Path, target_directory: Path) -> None:
+    def copy_files(self, source_directory: Path, target_directory: Path, *, top_level_only: bool = False) -> None:
         """Copies directory files to a target directory."""
-        for data in source_directory.rglob("*yaml"):  # Recursively walk through all files and directories
+        files = source_directory.glob("*.yaml") if top_level_only else source_directory.rglob("*yaml")
+        for data in files:
             item = Path(data)
             if item.is_file():
                 file_path = Path(target_directory, item.relative_to(source_directory))

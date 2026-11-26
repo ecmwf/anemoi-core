@@ -39,14 +39,14 @@ def args() -> argparse.Namespace:
 def test_merge_sysargv_basic(cmd: ConcreteCommand, args: argparse.Namespace) -> None:
     with mock.patch.object(sys, "argv", ["/env/bin/anemoi-training", "train"]):
         result = cmd._merge_sysargv(args)
-    assert result == "/env/bin/.anemoi-training-train"
+    assert result == "/env/bin/_anemoi-training-train"
 
 
 def test_merge_sysargv_with_subcommand(cmd: ConcreteCommand) -> None:
     args = argparse.Namespace(command="evaluate", subcommand="deterministic")
     with mock.patch.object(sys, "argv", ["/env/bin/anemoi-training", "evaluate"]):
         result = cmd._merge_sysargv(args)
-    assert result == "/env/bin/.anemoi-training-evaluate-deterministic"
+    assert result == "/env/bin/_anemoi-training-evaluate-deterministic"
 
 
 def test_prepare_sysargv_sets_env_var(cmd: ConcreteCommand, args: argparse.Namespace) -> None:
@@ -63,14 +63,14 @@ def test_prepare_sysargv_sets_env_var(cmd: ConcreteCommand, args: argparse.Names
 def test_prepare_sysargv_no_unknown_args(cmd: ConcreteCommand, args: argparse.Namespace) -> None:
     with mock.patch.object(sys, "argv", ["/env/bin/anemoi-training", "train"]):
         cmd.prepare_sysargv(args)
-        assert sys.argv == ["/env/bin/.anemoi-training-train"]
+        assert sys.argv == ["/env/bin/_anemoi-training-train"]
 
 
 def test_prepare_sysargv_with_unknown_args(cmd: ConcreteCommand, args: argparse.Namespace) -> None:
     unknown = ["model=transformer", "training.lr=1e-4"]
     with mock.patch.object(sys, "argv", ["/env/bin/anemoi-training", "train"]):
         cmd.prepare_sysargv(args, unknown_args=unknown)
-        assert sys.argv == ["/env/bin/.anemoi-training-train", "model=transformer", "training.lr=1e-4"]
+        assert sys.argv == ["/env/bin/_anemoi-training-train", "model=transformer", "training.lr=1e-4"]
 
 
 def test_env_var_differs_per_subclass() -> None:

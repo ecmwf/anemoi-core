@@ -68,9 +68,9 @@ class MultiScaleEdges(BaseEdgeBuilder):
             assert scale_resolutions >= 0, "The scale_resolutions argument only supports non-negative integers."
             scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
-        assert (
-            scale_resolutions is None or min(scale_resolutions) >= 0
-        ), "The scale_resolutions argument only supports non-negative integers."
+        assert scale_resolutions is None or min(scale_resolutions) >= 0, (
+            "The scale_resolutions argument only supports non-negative integers."
+        )
         self.scale_resolutions = scale_resolutions
 
     @staticmethod
@@ -88,6 +88,11 @@ class MultiScaleEdges(BaseEdgeBuilder):
 
         edge_builder_cls = getattr(importlib.import_module(module_name), class_name)
         return edge_builder_cls
+
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
+        )
 
     def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
         edge_builder_cls = MultiScaleEdges.get_edge_builder_class(source_nodes.node_type)

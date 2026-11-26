@@ -15,10 +15,10 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.utils import load_graph_from_file
 
 
 class TestGraphCreator:
-
     @pytest.mark.parametrize("name", ["graph.pt", None])
     def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int], name: str):
         """Test GraphCreator workflow."""
@@ -51,6 +51,6 @@ class TestGraphCreator:
 
         if graph_path is not None:
             assert graph_path.exists()
-            graph_saved = torch.load(graph_path, weights_only=False)
+            graph_saved = load_graph_from_file(graph_path)
             assert graph.node_types == graph_saved.node_types
             assert graph.edge_types == graph_saved.edge_types

@@ -5,6 +5,12 @@ pin_memory: True
 # worker. Keep (GPUs per node) x (workers per GPU) x blosc_threads below the
 # number of CPU cores of the node.
 blosc_threads: 4
+# keep dataloader workers alive between epochs instead of starting new ones every epoch
+persistent_workers: False
+fake_dataloading: False
+
+loading_policy:
+  _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
 
 # ============
 # read_group_size:

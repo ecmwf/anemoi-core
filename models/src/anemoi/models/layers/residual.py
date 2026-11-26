@@ -60,9 +60,15 @@ class BaseResidualConnection(nn.Module, ABC):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    This layer returns the most recent timestep from the input sequence.
+    This layer returns the input step selected by 'step'.
 
+    The default is to return the last input step.
     This module is used to bypass processing layers and directly pass the latest input forward.
+    Parameters
+    ----------
+    step : int, default -1
+        Index along the time dimension of the input to return.
+        -1 selects the most recent (last) input step.
     """
 
     def __init__(self, step: int = -1, **_) -> None:
@@ -76,7 +82,7 @@ class SkipConnection(BaseResidualConnection):
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
-        """Return the last timestep of the input sequence."""
+        """Return one of the input steps."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
         return self._expand_time(x_skip, n_step_output)
 
@@ -257,15 +263,15 @@ class TruncatedConnection(BaseResidualConnection):
         """Validate and return the (up, down) edge tuples."""
         files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
         if files_specified:
-            assert (
-                truncation_up_edges_name is None and truncation_down_edges_name is None
-            ), "Specify either file paths or edge names for truncation, not both."
+            assert truncation_up_edges_name is None and truncation_down_edges_name is None, (
+                "Specify either file paths or edge names for truncation, not both."
+            )
             return None, None
 
         assert graph is not None, "graph must be provided when file paths are not specified."
-        assert (
-            truncation_up_edges_name is not None and truncation_down_edges_name is not None
-        ), "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
+        assert truncation_up_edges_name is not None and truncation_down_edges_name is not None, (
+            "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
+        )
         up_edges = tuple(truncation_up_edges_name)
         down_edges = tuple(truncation_down_edges_name)
         assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."

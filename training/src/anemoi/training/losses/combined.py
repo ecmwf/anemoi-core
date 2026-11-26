@@ -29,6 +29,7 @@ class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
     # CombinedLoss builds child losses itself, so it needs the full scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(
@@ -142,6 +143,11 @@ class CombinedLoss(BaseLoss):
     def needs_shard_layout_info(self) -> bool:
         """Whether any wrapped loss requires explicit shard-layout metadata."""
         return any(getattr(loss, "needs_shard_layout_info", False) for loss in self.losses)
+
+    @property
+    def scores_across_time(self) -> bool:
+        """Whether any wrapped loss scores across output steps."""
+        return any(loss.scores_across_time for loss in self.losses)
 
     @staticmethod
     def _forward_kwargs_for_loss(loss_fn: BaseLoss, kwargs: dict[str, Any]) -> dict[str, Any]:

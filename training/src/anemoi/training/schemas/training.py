@@ -25,7 +25,8 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
+from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -235,9 +236,11 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 
 class SpectralDimensionScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
-    n_spectral_modes: PositiveInt = Field(example=193)
-    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
-    spectral_dims: PositiveInt | None = Field(default=None, example=193)
+    n_spectral_modes: PositiveInt = Field(example=192)
+    "Number of modes to average over. For SHT-based losses this is ``truncation + 1`` for PowerSpectrumLoss and "
+    "SpectralAMSELoss, and ``(truncation + 1)**2`` for SpectralCRPSLoss, LogSpectralDistance and "
+    "FourierCorrelationLoss."
+    spectral_dims: PositiveInt | None = Field(default=None, example=192)
     "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
     "Set explicitly for losses that keep the full (L, M) dimension flattened."
     norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
@@ -330,6 +333,68 @@ class GraphLossMatrixSchema(BaseModel):
     row_normalize: bool = False
 
 
+class GraphScoreGraphSchema(BaseModel):
+    """Graph edge definition used by graph score losses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    edges_name: tuple[str, str, str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+    validate_row_sums: bool = False
+
+
+class EnsembleScoreLossSchema(BaseModel):
+    """Configuration shared by ensemble score losses."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    scalers: list[str] = Field(default_factory=list, example=["variable"])
+    ignore_nans: bool = False
+    predicted_variables: list[str] | None = None
+    target_variables: list[str] | None = None
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    no_autocast: bool = True
+
+
+class GraphScoreLossSchema(EnsembleScoreLossSchema):
+    """Configuration shared by graph score losses."""
+
+
+class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEnergyScoreLoss"] = Field(..., alias="_target_")
+    fair: bool = True
+    loss_graph: GraphScoreGraphSchema | None = None
+
+
+class EnergyScoreLossSchema(EnsembleScoreLossSchema):
+    target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
+    fair: bool = True
+    norm_over: list[EnergyScoreDimension] = Field(default=["grid"], min_length=1)
+
+
+class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphVariogramScoreLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    p: float = Field(default=1.0, gt=0.0)
+    fair: bool = True
+
+
+class GraphEdgeCRPSLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEdgeCRPSLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    alpha: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class GraphEdgeEnergyScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEdgeEnergyScoreLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    fair: bool = True
+
+
 class MultiscaleConfigDiskSchema(BaseModel):
     """File-based multiscale config: smoothing matrices loaded from .npz files."""
 
@@ -403,7 +468,16 @@ class TimeAggregateLossWrapperSchema(BaseModel):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: CRPSSchema | TimeAggregateLossWrapperSchema | BaseLossSchema
+    per_scale_loss: (
+        CRPSSchema
+        | TimeAggregateLossWrapperSchema
+        | GraphEnergyScoreLossSchema
+        | EnergyScoreLossSchema
+        | GraphVariogramScoreLossSchema
+        | GraphEdgeCRPSLossSchema
+        | GraphEdgeEnergyScoreLossSchema
+        | BaseLossSchema
+    )
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
@@ -509,16 +583,18 @@ class SpectralProjectionConfigSchema(BaseModel):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
-    subgrid: tuple[int, int | None] | str | None = None
+    subgrid: tuple[int, int | None] | Literal["output_mask"] | None = None
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
+    coefficient_magnitude: bool = False
+    """For spectral CRPS, compare the moduli of the coefficients rather than their complex values."""
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
-        if self.subgrid is not None and self.transform in ("reduced_sht", "octahedral_sht"):
+        if self.subgrid is not None and self.transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{self.transform}' transform: "
                 "spherical harmonic transforms require the full grid"
@@ -532,28 +608,29 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+_LOSS_DISCRIMINATOR_TAGS = {
+    "anemoi.training.losses.combined.CombinedLoss": "combined",
+    "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
+    "anemoi.training.losses.CRPS": "crps",
+    "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
+    "anemoi.training.losses.EnergyScoreLoss": "energy_score",
+    "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
+    "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
+    "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
+    "anemoi.training.losses.FourierCorrelationLoss": "spectral",
+    "anemoi.training.losses.LogSpectralDistance": "spectral",
+    "anemoi.training.losses.LogFFT2Distance": "spectral",
+    "anemoi.training.losses.SpectralCRPSLoss": "spectral",
+    "anemoi.training.losses.PowerSpectrumLoss": "spectral",
+    "anemoi.training.losses.SpectralAMSELoss": "spectral",
+    "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
+}
+
+
 def _loss_discriminator(v: Any) -> str:
     target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
-    if target == "anemoi.training.losses.combined.CombinedLoss":
-        return "combined"
-    if target == "anemoi.training.losses.MultiscaleLossWrapper":
-        return "multiscale"
-    if target == "anemoi.training.losses.CRPS":
-        return "crps"
-    if target in {
-        "anemoi.training.losses.FourierCorrelationLoss",
-        "anemoi.training.losses.LogSpectralDistance",
-        "anemoi.training.losses.LogFFT2Distance",
-        "anemoi.training.losses.SpectralCRPSLoss",
-        "anemoi.training.losses.PowerSpectrumLoss",
-        "anemoi.training.losses.SpectralAMSELoss",
-    }:
-        return "spectral"
-    if target == "anemoi.training.losses.HuberLoss":
-        return "huber"
-    if target == "anemoi.training.losses.aggregate.TimeAggregateLossWrapper":
-        return "time_aggregate"
-    return "base"
+    return _LOSS_DISCRIMINATOR_TAGS.get(target, "base")
 
 
 class CombinedLossSchema(BaseLossSchema):
@@ -574,6 +651,11 @@ class CombinedLossSchema(BaseLossSchema):
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
+            | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+            | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
+            | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
+            | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
+            | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
@@ -629,6 +711,11 @@ LossSchemas = Annotated[
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
+    | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+    | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
+    | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
+    | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
+    | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
@@ -639,6 +726,14 @@ LossSchemas = Annotated[
 class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
     ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
     ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
+
+
+class SingleDeviceStrategySchema(BaseModel):
+    target_: Literal["anemoi.training.distributed.single.SingleDeviceStrategy"] = Field(..., alias="_target_")
+    "Hydra target for the single device strategy."
+    device: str = "auto"
+    "Device to use for training."
+    model_config = ConfigDict(extra="ignore")
 
 
 class BaseDDPStrategySchema(BaseModel):
@@ -653,6 +748,12 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
+    static_graph: bool = Field(default=False, example=False)
+    """Tell DDP that the same parameters are trained in every step. Can be faster for large models, but must be
+    false when training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=True, example=True)
+    """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
+    DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -662,7 +763,7 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
     "Number of GPUs per ensemble."
 
 
-StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
+StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | SingleDeviceStrategySchema
 
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
@@ -676,25 +777,45 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild tendency pre/post-processing statistics from the current dataset."
 
 
+class CheckpointPipelineSchema(BaseModel):
+    """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
+
+    Each block is a Hydra ``_target_`` config: at most one acquisition ``source`` and
+    one ``loading`` strategy, plus an ordered list of ``modifiers`` applied after
+    loading. A ``None`` field configures no checkpoint pipeline (a fresh run).
+    """
+
+    source: GenericSchema | None = Field(default=None)
+    "Acquisition source stage (LocalSource / RunIdSource / S3Source / HTTPSource)."
+    loading: GenericSchema | None = Field(default=None)
+    "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
+    modifiers: list[GenericSchema] | None = Field(default=None)
+    "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: str | None = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
-    fork_run_id: str | None = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
-    load_weights_only: bool = Field(example=False)
-    "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(example=False)
-    "Flag to activate transfer learning mode when loading a checkpoint."
+    seed: NonNegativeInt | None = Field(default=None, example=None)
+    """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
+    checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
+    interrupted epoch."""
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
+    allow_variable_subset: bool = Field(default=False)
+    "Allow fine-tuning into a model with FEWER variables (issue #838). When True, a checkpoint"
+    " whose variable set is a superset of the current dataset's is accepted instead of raising,"
+    " provided the shared variables keep the same relative order; the variable-dependent layers"
+    " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(example=["processor"])
-    "List of submodules to freeze during transfer learning."
+    checkpoint: CheckpointPipelineSchema | None = Field(default=None)
+    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
+    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
+    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
+    " no checkpoint pipeline (a fresh run)."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."
@@ -733,6 +854,14 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+
+    @model_validator(mode="after")
+    def check_static_graph_without_accumulation(self) -> Self:
+        """DDP's static graph does not support accumulating gradients over several batches."""
+        if self.accum_grad_batches > 1 and getattr(self.strategy, "static_graph", False):
+            error_msg = "training.strategy.static_graph must be false when training.accum_grad_batches > 1."
+            raise ValueError(error_msg)
+        return self
 
 
 class SingleTrainingMethodSchema(BaseModel):

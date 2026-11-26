@@ -8,14 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
 import os
 import warnings
-
-from torch.utils.data import get_worker_info
-
-LOGGER = logging.getLogger(__name__)
-
 
 def set_blosc_threads(blosc_threads: int | None) -> None:
     """Set the number of blosc threads in this process.
@@ -51,30 +45,15 @@ def set_blosc_threads(blosc_threads: int | None) -> None:
 
 
 def worker_init_func(worker_id: int, blosc_threads: int | None = None) -> None:
-    """Configures each dataset worker process.
-
-    Calls per_worker_init() on each dataset object.
+    """Configure a dataloader worker process.
 
     Parameters
     ----------
     worker_id : int
-        Worker ID
+        Worker ID. This function does not use it.
     blosc_threads : int | None, optional
         Number of blosc threads in the worker. If None, blosc uses one thread.
 
-    Raises
-    ------
-    RuntimeError
-        If worker_info is None
-
     """
-    worker_info = get_worker_info()  # information specific to each worker process
-    if worker_info is None:
-        LOGGER.error("worker_info is None! Set num_workers > 0 in your dataloader!")
-        raise RuntimeError
+    del worker_id
     set_blosc_threads(blosc_threads)
-    dataset_obj = worker_info.dataset  # the copy of the dataset held by this worker process.
-    dataset_obj.per_worker_init(
-        n_workers=worker_info.num_workers,
-        worker_id=worker_id,
-    )

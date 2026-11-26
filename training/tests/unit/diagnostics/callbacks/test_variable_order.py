@@ -23,7 +23,6 @@ from anemoi.training.train.train import AnemoiTrainer
 
 
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -102,6 +101,10 @@ def test_on_epoch(
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
+
+    fake_trainer.datamodule.loading_policy.check_dataset_compatibility.assert_called_once_with(
+        fake_trainer.datamodule.ds_train,
+    )
 
     assert (
         fake_trainer.datamodule.data_indices["data"].compare_variables(
@@ -253,6 +256,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.config = types.SimpleNamespace(
         training=types.SimpleNamespace(
+            load_weights_only=False,
             update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
         ),
     )

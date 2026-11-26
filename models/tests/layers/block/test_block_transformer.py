@@ -52,13 +52,10 @@ class TestTransformerProcessorBlock:
         ),
         window_size=st.integers(min_value=1, max_value=512),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
-        softcap=st.floats(min_value=0.0, max_value=1.0),
         qk_norm=st.booleans(),
     )
     @settings(max_examples=10)
-    def test_init(
-        self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, softcap, qk_norm
-    ):
+    def test_init(self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, qk_norm):
         num_channels = num_heads * factor_attention_heads
 
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
@@ -71,7 +68,6 @@ class TestTransformerProcessorBlock:
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
-            softcap=softcap,
             qk_norm=qk_norm,
         )
         assert isinstance(block, TransformerProcessorBlock)

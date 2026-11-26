@@ -10,6 +10,7 @@
 
 import os
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -67,6 +68,10 @@ class GraphPartition:
         Per-partition destination node counts.
     edge_splits : list[int]
         Per-partition edge counts (derived from dst-sorted edge structure).
+    src_splits : list[int], optional
+        Per-partition source node counts, independent of destination ownership.
+        ``None`` when the source nodes are not sharded. Building halo metadata
+        requires it.
     """
 
     num_nodes: tuple[int, int]
@@ -74,6 +79,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,
@@ -172,7 +178,7 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
 
     if ANEMOI_DEBUG_SHARDING:
         assert is_edge_index_dst_sorted(edge_index), (
-            "build_graph_partition requires edge_index sorted by destination node, " "but received unsorted edges."
+            "build_graph_partition requires edge_index sorted by destination node, but received unsorted edges."
         )
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
@@ -220,6 +226,7 @@ def build_graph_partition_from_shard_info(
     n_src = sum(shard_info.src_nodes) if shard_info.src_is_sharded() else x_src.size(0)
     n_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
+    src_splits = shard_info.src_nodes
 
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
@@ -233,10 +240,12 @@ def build_graph_partition_from_shard_info(
             num_parts=comm_size,
             dst_splits=dst_splits,
             edge_splits=edge_splits,
+            src_splits=src_splits,
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    return replace(partition, src_splits=src_splits)
 
 
 def ensure_edges_are_dst_sorted(
@@ -354,26 +363,26 @@ def shard_graph_to_local(
     if not model_is_distributed(model_comm_group):
         return x, edge_attr, edge_index, shard_info, cond
 
-    assert (
-        model_comm_group.size() == partition.num_parts
-    ), f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
+    assert model_comm_group.size() == partition.num_parts, (
+        f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
+    )
 
     x_src, x_dst = x
     my_rank = torch.distributed.get_rank(group=model_comm_group)
 
     # shard or validate dst nodes
     if shard_info.dst_is_sharded():
-        assert (
-            shard_info.dst_nodes == partition.dst_splits
-        ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
+        assert shard_info.dst_nodes == partition.dst_splits, (
+            f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
+        )
     else:
         x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
 
     # shard or validate edges
     if shard_info.edges_are_sharded():
-        assert (
-            shard_info.edges == partition.edge_splits
-        ), f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
+        assert shard_info.edges == partition.edge_splits, (
+            f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
+        )
     else:
         edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
         edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)

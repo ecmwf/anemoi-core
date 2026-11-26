@@ -10,6 +10,7 @@
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from hydra.utils import get_class
@@ -32,15 +33,19 @@ WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
-def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
-    """Return runtime kwargs for classes that declare ``needs_graph_data``."""
+def _graph_data_kwargs(
+    target_cls: type,
+    graph_data: object | None,
+    data_node_name: str | None,
+) -> dict:
+    """Return graph runtime context explicitly requested by a loss class."""
     if not getattr(target_cls, "needs_graph_data", False):
         return {}
     result: dict = {}
     if graph_data is not None:
         result["graph_data"] = graph_data
-    if extra_kwargs:
-        result.update(extra_kwargs)
+    if data_node_name is not None and getattr(target_cls, "needs_data_node_name", False):
+        result["data_node_name"] = data_node_name
     return result
 
 
@@ -117,6 +122,27 @@ def _propagate_combined_scalers(loss_config: dict, scalers_to_include: list) -> 
             sub_loss["scalers"] = list(scalers_to_include)
 
 
+def _wrap_inside_variable_mapper(
+    inner_loss: BaseLoss,
+    build_wrapper: Callable[[BaseLoss], BaseLoss],
+) -> BaseLoss:
+    """Build a loss wrapper and keep the variable filter of its inner loss on the outside.
+
+    With data indices, the inner loss comes out of the factory wrapped in a ``LossVariableMapper``.
+    The filter is moved outside the new wrapper, so the wrapper only smooths or aggregates the
+    selected variables, not the full target (e.g. DATA_FULL with forcings). Done at every wrapper,
+    this keeps the filter outermost however the wrappers are nested. The scalers are already
+    filtered and attached to the shared inner loss.
+    """
+    if not isinstance(inner_loss, LossVariableMapper):
+        return build_wrapper(inner_loss)
+
+    wrapper = build_wrapper(inner_loss.loss)
+    inner_loss.loss = wrapper
+    inner_loss.supports_sharding = wrapper.supports_sharding
+    return inner_loss
+
+
 def _build_wrapped_loss(
     loss_config: dict,
     scalers_to_include: list,
@@ -126,7 +152,7 @@ def _build_wrapped_loss(
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
     inner_loss_config = loss_config.pop("loss_fn")
     inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
-    wrapper = instantiate(loss_config, loss_fn=inner_loss)
+    wrapper = _wrap_inside_variable_mapper(inner_loss, lambda inner: instantiate(loss_config, loss_fn=inner))
     # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
     if scalers_to_include and scalers:
         resolved = (
@@ -136,6 +162,12 @@ def _build_wrapped_loss(
         )
         _apply_scalers(wrapper, resolved, scalers, data_indices)
     return wrapper
+
+
+def _check_subgrid_resolved(loss_config: dict) -> None:
+    if isinstance(loss_config.get("subgrid"), str):
+        msg = f"'subgrid' must be resolved to a tuple before instantiation, got {loss_config['subgrid']!r}"
+        raise TypeError(msg)
 
 
 # Future import breaks other type hints TODO Harrison Cook
@@ -182,6 +214,7 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    _check_subgrid_resolved(loss_config)
     has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
     target_cls = get_class(loss_config["_target_"])
@@ -189,7 +222,6 @@ def get_loss_function(
     target_variables = loss_config.pop("target_variables", None)
     compatibility_options = loss_config.pop("check_variables_compatibility", {})
 
-    graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
     target = loss_config.get("_target_")
 
     # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
@@ -206,11 +238,15 @@ def get_loss_function(
             data_node_name=data_node_name,
             **kwargs,
         )
-        return instantiate(
-            loss_config,
-            per_scale_loss=per_scale_loss,
-            **kwargs,
-            **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+
+        return _wrap_inside_variable_mapper(
+            per_scale_loss,
+            lambda inner: instantiate(
+                loss_config,
+                per_scale_loss=inner,
+                **kwargs,
+                **_graph_data_kwargs(target_cls, graph_data, data_node_name),
+            ),
         )
 
     if target in WRAPPED_LOSSES:
@@ -242,7 +278,7 @@ def get_loss_function(
         loss_config,
         **constructor_kwargs,
         **kwargs,
-        **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        **_graph_data_kwargs(target_cls, graph_data, data_node_name),
         _recursive_=False,
     )
 
@@ -279,13 +315,11 @@ def _apply_scalers(
         if key not in scalers or []:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
-        if key in ["stdev_tendency", "var_tendency"]:
+        if key in ["stdev_tendency", "var_tendency"] and data_indices is not None:
             for var_key, idx in data_indices.model.output.name_to_index.items():
-                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
-                    var_key,
-                ):
+                if idx in data_indices.model.output.prognostic:
                     scaling = scalers[key][1][idx]
-                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
+                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.4g", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
 
 

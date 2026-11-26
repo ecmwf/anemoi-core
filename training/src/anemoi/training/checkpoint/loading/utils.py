@@ -10,7 +10,7 @@
 """Pure utility functions for state dict manipulation.
 
 These are stateless helpers used by loading strategies. No model loading,
-no async, no pipeline wiring — just pure functions on state dicts.
+no pipeline wiring — just pure functions on state dicts.
 """
 
 from __future__ import annotations
@@ -31,15 +31,15 @@ def filter_state_dict(
     Parameters
     ----------
     source : dict
-        Source state dictionary (e.g. from checkpoint)
+        Source state dictionary (e.g. from checkpoint).
     target : dict
-        Target state dictionary (e.g. from model)
+        Target state dictionary (e.g. from model).
 
     Returns
     -------
     tuple[dict, dict]
         (filtered, skipped) where filtered contains compatible entries
-        and skipped maps key to a reason string for incompatible entries
+        and skipped maps key to a reason string for incompatible entries.
     """
     filtered: dict[str, Any] = {}
     skipped: dict[str, str] = {}

@@ -60,7 +60,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         model_config = DotDict(model_config)
 
-        transport_params = model_config.model.model.transport
+        transport_params = model_config.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -157,15 +157,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch_size, _, ensemble_size = condition_ref.shape[:3]
         for dataset_name in dataset_names:
             condition_shape = condition[dataset_name].shape
-            assert (
-                len(condition_shape) == 5
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[1] == condition_shape[3] == condition_shape[4] == 1
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[0] == batch_size and condition_shape[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            assert len(condition_shape) == 5, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
+                "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            )
         return batch_size, ensemble_size
 
     def _generate_noise_conditioning(
@@ -174,24 +174,22 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         dataset_name: str,
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
-
+        hidden_name = self.dataset2hidden[dataset_name]
         c_data = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[dataset_name])
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[hidden_name])
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(dataset_name, "to", self._graph_name_hidden)]["edge_length"].shape[0],
+                repeat=self._graph_data[(dataset_name, "to", hidden_name)]["edge_length"].shape[0],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", dataset_name)]["edge_length"].shape[0],
+                repeat=self._graph_data[(hidden_name, "to", dataset_name)]["edge_length"].shape[0],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
+                repeat=self._graph_data[(hidden_name, "to", hidden_name)]["edge_length"].shape[0],
             )
         else:
             c_data_to_hidden = None
@@ -283,15 +281,19 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         # Process each dataset through its corresponding encoder
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict: dict[str, torch.Tensor | None] = {}
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in dataset_names:
+        for dataset_name in x.keys():
+            if dataset_name not in self.input_datasets:
+                continue
+
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 conditioned_target[dataset_name],
@@ -318,7 +320,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 edges=enc_edge_shard_sizes,
             )
 
-            x_data_latent, dataset_latents[dataset_name] = self.encoder[dataset_name](
+            # Encoder for this dataset
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=bse,
                 shard_info=enc_shard_info,
@@ -330,14 +334,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             x_data_latent_dict[dataset_name] = x_data_latent
 
-        x_latent = sum(dataset_latents.values())
+        # Combine all dataset latents
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         (
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
@@ -359,6 +364,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+            if dataset_name not in self.target_datasets:
+                continue
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -375,7 +382,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=bse,
                 shard_info=dec_shard_info,
@@ -398,6 +406,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -412,6 +421,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional parameters for subclasses.
 
@@ -435,6 +447,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 assert grid_shard_sizes is not None
                 grid_shard_sizes[dataset_name] = shard_sizes
                 x = shard_tensor(x, -2, shard_sizes, model_comm_group)
+
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            (x,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x,),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
+
             x = pre_processors[dataset_name](x, in_place=False)
 
             xs[dataset_name] = x
@@ -530,6 +552,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         sampler_params: Optional[dict] = None,
         pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run inference by sampling from the selected transport objective.
@@ -558,6 +581,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Pre-processing module for tendencies (used by subclasses).
         post_processors_tendencies : Optional[dict[str, nn.Module]]
             Post-processing module for tendencies (used by subclasses).
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional sampling parameters.
 
@@ -567,12 +593,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Sampled output (after post-processing).
         """
         with torch.no_grad():
-
             assert isinstance(batch, dict), "Input batch must be a dictionary!"
             for dataset_name, dataset_tensor in batch.items():
-                assert (
-                    len(dataset_tensor.shape) == 4
-                ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
+                assert len(dataset_tensor.shape) == 4, (
+                    f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
+                )
 
             # Before sampling hook
             before_sampling_data, grid_shard_sizes = self._before_sampling(
@@ -582,6 +607,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
+                spatial_pre_processors=spatial_pre_processors,
                 **kwargs,
             )
 
@@ -659,7 +685,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> None:
         model_config = DotDict(model_config)
 
-        self.condition_on_residual = model_config.model.condition_on_residual
+        self.condition_on_residual = model_config.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -846,22 +872,22 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 skip_imputation=skip_imputation,
             )
 
-            state_outp[dataset_name][
-                ..., self.data_indices[dataset_name].model.output.diagnostic
-            ] = post_processors_state[dataset_name](
-                tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=skip_imputation,
+            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic] = (
+                post_processors_state[dataset_name](
+                    tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                    skip_imputation=skip_imputation,
+                )
             )
 
-            state_outp[dataset_name][
-                ..., self.data_indices[dataset_name].model.output.prognostic
-            ] += post_processors_state[dataset_name](
-                state_inp[dataset_name],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.input.prognostic,
-                skip_imputation=skip_imputation,
+            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] += (
+                post_processors_state[dataset_name](
+                    state_inp[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.input.prognostic,
+                    skip_imputation=skip_imputation,
+                )
             )
 
             output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
@@ -881,6 +907,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -905,6 +932,15 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 x_in = shard_tensor(x_in, -2, shard_sizes, model_comm_group)
                 shard_sizes = get_shard_sizes(x_t0, -2, model_comm_group=model_comm_group)
                 x_t0 = shard_tensor(x_t0, -2, shard_sizes, model_comm_group)
+
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            (x_in, x_t0), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x_in, x_t0),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
 
             x_in = pre_processors[dataset_name](x_in, in_place=False)
             x_t0 = pre_processors[dataset_name](x_t0, in_place=False)
@@ -975,13 +1011,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 # Single-output tendency models may still provide one flat
                 # Processors object. Treat it as the only output-step processor.
                 # Multi-output models need an explicit processor for each lead time.
-                assert (
-                    self.n_step_output == 1
-                ), "Per-step tendency processors must be provided for multiple output steps."
+                assert self.n_step_output == 1, (
+                    "Per-step tendency processors must be provided for multiple output steps."
+                )
                 post_tend = [post_tend]
-            assert (
-                len(post_tend) == out_dataset.shape[1]
-            ), "Per-step tendency processors must match the number of output steps."
+            assert len(post_tend) == out_dataset.shape[1], (
+                "Per-step tendency processors must match the number of output steps."
+            )
 
             states = []
             for step, post_proc in enumerate(post_tend):

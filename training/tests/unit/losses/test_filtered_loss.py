@@ -14,6 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -166,6 +167,35 @@ def test_loss_variable_mapper_rejects_non_base_loss() -> None:
         LossVariableMapper(loss=object())  # type: ignore[arg-type]
 
 
+def test_loss_variable_mapper_preserves_wrapped_loss_reduction_default() -> None:
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"a": 0, "b": 1},
+    )
+    loss = LossVariableMapper(
+        loss=CRPS(alpha=0.7),
+        predicted_variables=["a", "b"],
+        target_variables=["a", "b"],
+        data_indices=data_indices,
+    )
+    pred = torch.tensor(
+        [[[[[0.0, 1.0]], [[2.0, 0.0]], [[1.0, 4.0]]]]],
+        dtype=torch.float64,
+    )
+    target = torch.tensor([[[[[1.0, 2.0]]]]], dtype=torch.float64)
+    loss_kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_OUTPUT,
+    }
+
+    scalar_loss = loss(pred, target, **loss_kwargs)
+    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
+    summed_loss = loss(pred, target, squash_mode="sum", **loss_kwargs)
+
+    torch.testing.assert_close(scalar_loss, per_variable_loss.mean())
+    torch.testing.assert_close(summed_loss, per_variable_loss.sum())
+
+
 # =============================================================================
 # LossVariableMapper behaviour tests
 #
@@ -246,7 +276,6 @@ class CapturingLoss(BaseLoss):
 
 
 class TestVariableAxisScalerFiltering:
-
     def test_mixed_dim_scaler_filtered_to_predicted(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Multi-dim (BATCH, GRID, VARIABLE) scaler is sliced on the VARIABLE axis."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
@@ -363,7 +392,6 @@ def test_rejects_invalid_layout_string(data_indices_forcing_gaps: IndexCollectio
 
 
 class TestScalerIndicesRemapping:
-
     def test_global_to_local_remap(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Global scaler_indices are translated to filtered-tensor-local positions."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
@@ -517,3 +545,32 @@ class TestScalerIndicesRemapping:
 
         torch.testing.assert_close(loss, torch.tensor(0.0))
         assert "Metric selection is empty; forward() will return zeros for this call." in caplog.text
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [
+        pytest.param(list(range(6)), id="all-in-order"),
+        pytest.param([2, 3, 4], id="contiguous-block"),
+        pytest.param([4, 0, 2], id="non-contiguous"),
+        pytest.param([5], id="single"),
+    ],
+)
+def test_select_variables_matches_advanced_indexing(indices: list[int]) -> None:
+    """_select_variables must give the same values and gradients as ``x[..., indices]``."""
+    x_ref = torch.randn(2, 3, 1, 7, 6, requires_grad=True)
+    x_new = x_ref.detach().clone().requires_grad_(True)
+    weights = torch.randn(2, 3, 1, 7, len(indices))
+
+    ref = x_ref[..., indices]
+    new = LossVariableMapper._select_variables(x_new, indices)
+    torch.testing.assert_close(new, ref)
+
+    (ref * weights).sum().backward()
+    (new * weights).sum().backward()
+    torch.testing.assert_close(x_new.grad, x_ref.grad)
+
+
+def test_select_variables_all_in_order_does_not_copy() -> None:
+    x = torch.randn(2, 4, 5)
+    assert LossVariableMapper._select_variables(x, list(range(5))) is x

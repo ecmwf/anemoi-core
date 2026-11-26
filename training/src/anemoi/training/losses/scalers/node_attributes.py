@@ -105,7 +105,7 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
         scaling_mask = self.nodes[self.scaling_mask_attribute_name].squeeze()
         unmasked_sum = torch.sum(values[~scaling_mask])
         weight_per_masked_node = (
-            self.weight_frac_of_total / (1 - self.weight_frac_of_total) * unmasked_sum / sum(scaling_mask)
+            self.weight_frac_of_total / (1 - self.weight_frac_of_total) * unmasked_sum / scaling_mask.sum()
         )
         values[scaling_mask] = weight_per_masked_node
 

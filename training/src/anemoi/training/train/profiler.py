@@ -336,9 +336,8 @@ class AnemoiProfiler(AnemoiTrainer):
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
-        elif self.config.training.fork_run_id:
-            parent_run = self.config.training.fork_run_id
-            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
+        elif self._fork_run_id:
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, self._fork_run_id)
         LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:

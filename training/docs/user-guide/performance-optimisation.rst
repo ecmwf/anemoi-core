@@ -237,6 +237,17 @@ cannot load input data fast enough to keep up with your GPU. This
 results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
+To determine whether a configuration is dataloader-bound, run the same
+configuration with ``dataloader.fake_dataloading=True``. This loads the
+first real sample and reuses it for subsequent batches, preserving valid
+shapes and numerical values while removing repeated dataset reads.
+A significant increase in throughput indicates that dataloading is the
+bottleneck. Possible fixes are to increase the number of workers when
+sufficient CPU memory is available, move the dataset to a faster or
+less congested filesystem, or rechunk the dataset along the grid
+dimension to better match the access pattern (if gpus_per_model is
+greater than 1).
+
 By default, each GPU will spawn 8 workers. Each worker will load data in
 parallel. You should try to increase this number until you run out of
 CPU memory. A CPU out of memory error looks like:
@@ -301,6 +312,18 @@ Hopper and Blackwell) which take advantage of hardware-specific features
 for further speedups.
 
 Flash attention is not the default as it must be compiled from source.
+
+The Transformer processor also supports a Triton backend. Its speed is
+close to flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
+enabled by default for the processor. The Triton backend does not support
+cross attention, so the encoder and decoder of the transformer mappers
+use PyTorch's scaled dot product attention by default. It can be selected
+in the config like so:
+
+.. code::
+
+   model.processor.attention_implementation: 'triton_attention'
+
 
 For the GraphTransformer processor, the 'triton' backend is the fastest.
 To use the 'triton' backend set the following config option:
@@ -385,6 +408,28 @@ be difficult to debug.
    such as chunking are exhausted.
 
 .. _compilation documentation: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/models.html#compilation
+
+Disable reproducible gradient synchronisation
+=============================================
+
+By default, ``training.strategy.static_graph`` is ``false`` and
+``training.strategy.find_unused_parameters`` is ``true``. With these
+settings, the gradients of all GPUs are summed in the same order in
+every step, so a resumed run continues bitwise identically. For large
+models, telling DDP that the same parameters are trained in every step
+can make training faster, at the cost of this exact reproducibility. In a
+benchmark of a 1B parameter model, this gave a 6% speedup, while smaller
+models showed no difference.
+
+.. code:: yaml
+
+   training:
+     strategy:
+       static_graph: True
+       find_unused_parameters: False
+
+``static_graph`` must stay ``false`` when
+``training.accum_grad_batches`` is larger than 1.
 
 Performance Profiling
 =====================

@@ -47,6 +47,7 @@ class BaseLoss(nn.Module, ABC):
     factory_context_keys: ClassVar[frozenset[LossFactoryContextKey | str]] = frozenset()
     scaler: ScaleTensor
     needs_graph_data: bool = False
+    needs_data_node_name: bool = False
 
     def __init__(
         self,
@@ -103,19 +104,19 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         x : torch.Tensor
-            Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs)
-        subset_indices: tuple[int,...], optional
+            Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs).
+        subset_indices : tuple[int, ...], optional
             Indices to subset the calculated scaler and `x` tensor with, by default None.
-        without_scalers: list[str] | list[int] | None, optional
-            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
-            By default None
+        without_scalers : list[str] | list[int] | None, optional
+            List of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None.
         grid_shard_slice : slice, optional
-            Slice of the grid if x comes sharded, by default None
+            Slice of the grid if x comes sharded, by default None.
 
         Returns
         -------
         torch.Tensor
-            Scaled error tensor
+            Scaled error tensor.
         """
         if subset_indices is None:
             if len(self.scaler) == 0:
@@ -156,16 +157,16 @@ class BaseLoss(nn.Module, ABC):
 
         Parameters
         ----------
-        pred : torch.Tensor,
-            Prediction tensor
-        target : torch.Tensor,
-            Target tensor
+        pred : torch.Tensor
+            Prediction tensor.
+        target : torch.Tensor
+            Target tensor.
 
         Returns
         -------
         torch.Tensor, torch.Tensor]
-            * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``
-            * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
+            * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``.
+            * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``.
         """
         if self.ignore_nans:
             nan_mask = torch.isnan(target + pred)
@@ -193,25 +194,25 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         out : torch.Tensor
-            Difference tensor, of shape TensorDim
+            Difference tensor, of shape TensorDim.
         squash : bool, optional
-            Whether to squash the variable dimension, by default True
-        squash_mode : {"avg", "sum"} , optional
-            Mode to use for squashing the variable dimension, by default "avg"
+            Whether to squash the variable dimension, by default True.
+        squash_mode : {"avg", "sum"}, optional
+            Mode to use for squashing the variable dimension, by default "avg".
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
         group : ProcessGroup | None, optional
-            Distributed group to reduce over, by default None
+            Distributed group to reduce over, by default None.
 
         Returns
         -------
         torch.Tensor
-            Reduced output tensor
+            Reduced output tensor.
 
         Raises
         ------
         ValueError
-            If squash_mode is not one of ['avg', 'sum']
+            If squash_mode is not one of ['avg', 'sum'].
         """
         if squash:
             if squash_mode == "avg":
@@ -267,6 +268,11 @@ class BaseLoss(nn.Module, ABC):
         """Whether the loss needs explicit shard-layout metadata beyond grid_shard_slice/group."""
         return False
 
+    @property
+    def scores_across_time(self) -> bool:
+        """Whether one score spans several output steps, so the loss needs the whole time window."""
+        return False
+
     @abstractmethod
     def forward(
         self,
@@ -286,29 +292,29 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs).
         target : torch.Tensor
-            Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs).
         squash : bool, optional
-            Average last dimension, by default True
-        scaler_indices: tuple[int,...], optional
-            Indices to subset the calculated scaler with, by default None
-        without_scalers: list[str] | list[int] | None, optional
-            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
-            By default None
+            Average last dimension, by default True.
+        scaler_indices : tuple[int, ...], optional
+            Indices to subset the calculated scaler with, by default None.
+        without_scalers : list[str] | list[int] | None, optional
+            List of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None.
         grid_shard_slice : slice, optional
-            Slice of the grid if x comes sharded, by default None
-        group: ProcessGroup, optional
-            Distributed group to reduce over, by default None
+            Slice of the grid if x comes sharded, by default None.
+        group : ProcessGroup, optional
+            Distributed group to reduce over, by default None.
         squash_mode : {"avg", "sum"}, optional
-            Reduction mode for the variable dimension, by default ``"avg"``
-        **kwargs
-            Additional keyword arguments
+            Reduction mode for the variable dimension, by default ``"avg"``.
+        **_kwargs
+            Additional keyword arguments.
 
         Returns
         -------
         torch.Tensor
-            Weighted loss
+            Weighted loss.
         """
 
 
@@ -358,24 +364,29 @@ class BaseLossWrapper(BaseLoss):
         """Delegate to the wrapped loss."""
         return getattr(self.loss, "needs_shard_layout_info", False)
 
+    @property
+    def scores_across_time(self) -> bool:
+        """Delegate to the wrapped loss."""
+        return self.loss.scores_across_time
+
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
         """Yield leaf losses from the wrapped loss."""
         yield from self.loss.iter_leaf_losses()
 
 
 class FunctionalLoss(BaseLoss):
-    """Loss which a user can subclass and provide `calculate_difference`.
+    """Loss which a user can subclass and provide ``calculate_difference``.
 
-    `calculate_difference` should calculate the difference between the prediction and target.
+    ``calculate_difference`` should calculate the difference between the prediction and target.
     All scaling and weighting is handled by the parent class.
 
-    Example:
-    --------
-    ```python
-    class MyLoss(FunctionalLoss):
-        def calculate_difference(self, pred, target):
-            return pred - target
-    ```
+    Example
+    -------
+    .. code-block:: python
+
+        class MyLoss(FunctionalLoss):
+            def calculate_difference(self, pred, target):
+                return pred - target
     """
 
     @abstractmethod
@@ -400,29 +411,29 @@ class FunctionalLoss(BaseLoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs).
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, lat*lon, n_outputs).
         squash : bool, optional
-            Average last dimension, by default True
-        scaler_indices: tuple[int,...], optional
-            Indices to subset the calculated scaler with, by default None
-        without_scalers: list[str] | list[int] | None, optional
-            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
-            By default None
+            Average last dimension, by default True.
+        scaler_indices : tuple[int, ...], optional
+            Indices to subset the calculated scaler with, by default None.
+        without_scalers : list[str] | list[int] | None, optional
+            List of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None.
         grid_shard_slice : slice, optional
-            Slice of the grid if x comes sharded, by default None
-        group: ProcessGroup, optional
-            Distributed group, by default None
+            Slice of the grid if x comes sharded, by default None.
+        group : ProcessGroup, optional
+            Distributed group, by default None.
         squash_mode : {"avg", "sum"}, optional
-            Reduction mode for the variable dimension, by default ``"avg"``
-        **kwargs
-            Additional keyword arguments
+            Reduction mode for the variable dimension, by default ``"avg"``.
+        **_kwargs
+            Additional keyword arguments.
 
         Returns
         -------
         torch.Tensor
-            Weighted loss
+            Weighted loss.
         """
         is_sharded = grid_shard_slice is not None
         pred, target = self.mask_nans(pred, target)

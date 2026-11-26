@@ -13,19 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import time
+import urllib.error
 from pathlib import Path
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
-import aiohttp
 import pytest
 import torch
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
@@ -43,33 +38,33 @@ TIMEOUT = 60
 
 
 class TestDownloadWithRetry:
-    """Test async download functionality with retry logic."""
+    """Test download functionality with retry logic."""
 
     @pytest.mark.unit
     @pytest.mark.network
-    async def test_download_with_retry_success(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+    def test_download_with_retry_success(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
         """Test successful download on first attempt."""
         dest_path = temp_checkpoint_dir / "downloaded_file.bin"
 
         try:
-            result_path = await download_with_retry(network_urls["valid"], dest_path, max_retries=3, timeout=TIMEOUT)
+            result_path = download_with_retry(network_urls["valid"], dest_path, max_retries=3, timeout=TIMEOUT)
 
             assert result_path == dest_path
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
+        except (TimeoutError, OSError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
     @pytest.mark.network
-    async def test_download_with_retry_timeout(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+    def test_download_with_retry_timeout(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
         """Test download timeout and retry behavior."""
         dest_path = temp_checkpoint_dir / "timeout_file.bin"
 
         try:
             with pytest.raises((CheckpointTimeoutError, CheckpointSourceError)):
-                await download_with_retry(
+                download_with_retry(
                     network_urls["timeout"],
                     dest_path,
                     max_retries=2,
@@ -80,19 +75,19 @@ class TestDownloadWithRetry:
 
     @pytest.mark.unit
     @pytest.mark.network
-    async def test_download_with_retry_not_found(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+    def test_download_with_retry_not_found(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
         """Test download with 404 error."""
         dest_path = temp_checkpoint_dir / "not_found_file.bin"
 
         with pytest.raises(CheckpointSourceError) as exc_info:
-            await download_with_retry(network_urls["not_found"], dest_path, max_retries=2, timeout=60)
+            download_with_retry(network_urls["not_found"], dest_path, max_retries=2, timeout=60)
 
         # The message is "http" and source_path contains the URL
         assert "http" in exc_info.value.message or "http" in exc_info.value.source_path
 
     @pytest.mark.unit
     @pytest.mark.network
-    async def test_download_with_retry_server_error(
+    def test_download_with_retry_server_error(
         self,
         temp_checkpoint_dir: Path,
         network_urls: dict[str, str],
@@ -101,74 +96,37 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "server_error_file.bin"
 
         with pytest.raises(CheckpointSourceError):
-            await download_with_retry(network_urls["server_error"], dest_path, max_retries=2, timeout=TIMEOUT)
+            download_with_retry(network_urls["server_error"], dest_path, max_retries=2, timeout=TIMEOUT)
 
     @pytest.mark.unit
-    async def test_download_with_retry_creates_parent_dir(self, temp_checkpoint_dir: Path) -> None:
+    def test_download_with_retry_creates_parent_dir(self, temp_checkpoint_dir: Path) -> None:
         """Test that download creates parent directories."""
         nested_path = temp_checkpoint_dir / "nested" / "deep" / "file.bin"
 
-        # Mock successful HTTP response
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = Mock()
-        mock_response.headers = {"content-length": "1024"}
+        with patch("urllib.request.urlopen", return_value=_mock_response([b"test_data"])):
+            result_path = download_with_retry("https://example.com/file.bin", nested_path, max_retries=1)
 
-        # Create an async iterator for the chunk data
-        async def mock_chunk_iter(_chunk_size: int) -> AsyncGenerator[bytes, None]:
-            yield b"test_data"
-
-        mock_response.content.iter_chunked = mock_chunk_iter
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock the session.get() context manager
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock()
-        mock_session.get = Mock(return_value=mock_get_context)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("aiohttp.ClientSession") as mock_client_session:
-            mock_client_session.return_value = mock_session
-
-            result_path = await download_with_retry("https://example.com/file.bin", nested_path, max_retries=1)
-
-            assert result_path == nested_path
-            assert nested_path.exists()
-            assert nested_path.parent.exists()
+        assert result_path == nested_path
+        assert nested_path.exists()
+        assert nested_path.parent.exists()
 
     @pytest.mark.unit
-    async def test_download_with_retry_exponential_backoff(self, temp_checkpoint_dir: Path) -> None:
+    def test_download_with_retry_exponential_backoff(self, temp_checkpoint_dir: Path) -> None:
         """Test exponential backoff behavior on retries."""
         dest_path = temp_checkpoint_dir / "backoff_test.bin"
 
-        # Mock client error that triggers retry - error should happen when entering context manager
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectionError("Connection failed"))
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        with (
+            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection failed")),
+            patch("time.sleep") as mock_sleep,
+            pytest.raises(CheckpointSourceError),
+        ):
+            download_with_retry("https://example.com/fail.bin", dest_path, max_retries=3, timeout=TIMEOUT)
 
-        mock_session = AsyncMock()
-        mock_session.get = Mock(return_value=mock_get_context)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        start_time = time.time()
-
-        with patch("aiohttp.ClientSession") as mock_client_session:
-            mock_client_session.return_value = mock_session
-
-            with pytest.raises(CheckpointSourceError):
-                await download_with_retry("https://example.com/fail.bin", dest_path, max_retries=3, timeout=TIMEOUT)
-
-        # Should have waited for exponential backoff: 1s + 2s = 3s minimum
-        elapsed_time = time.time() - start_time
-        assert elapsed_time >= 3.0  # 2^0 + 2^1 = 3 seconds total backoff
+        # 2^0 + 2^1: one wait between each pair of attempts.
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [1, 2]
 
     @pytest.mark.unit
-    async def test_download_with_retry_progress_logging(self, temp_checkpoint_dir: Path) -> None:
+    def test_download_with_retry_progress_logging(self, temp_checkpoint_dir: Path) -> None:
         """Test progress logging during download."""
         dest_path = temp_checkpoint_dir / "progress_test.bin"
 
@@ -176,95 +134,36 @@ class TestDownloadWithRetry:
         chunk_size = 8192
         large_data = [b"x" * chunk_size for _ in range(150)]  # >100 chunks to trigger logging
 
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = Mock()
-        mock_response.headers = {"content-length": str(len(large_data) * chunk_size)}
+        with (
+            patch("urllib.request.urlopen", return_value=_mock_response(large_data)),
+            patch("anemoi.training.checkpoint.utils.LOGGER") as mock_logger,
+        ):
+            result_path = download_with_retry("https://example.com/large.bin", dest_path, chunk_size=chunk_size)
 
-        # Create an async iterator for the large chunk data
-        async def mock_large_chunk_iter(_chunk_size: int) -> AsyncGenerator[bytes, None]:
-            for chunk in large_data:
-                yield chunk
-
-        mock_response.content.iter_chunked = mock_large_chunk_iter
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock the session.get() context manager
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock()
-        mock_session.get = Mock(return_value=mock_get_context)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("aiohttp.ClientSession") as mock_client_session:
-            mock_client_session.return_value = mock_session
-
-            with patch("anemoi.training.checkpoint.utils.LOGGER") as mock_logger:
-                result_path = await download_with_retry(
-                    "https://example.com/large.bin",
-                    dest_path,
-                    chunk_size=chunk_size,
-                )
-
-                assert result_path == dest_path
-                # Should have logged progress (debug calls for progress updates)
-                assert mock_logger.debug.call_count > 0
+        assert result_path == dest_path
+        # Should have logged progress (debug calls for progress updates)
+        assert mock_logger.debug.call_count > 0
 
     @pytest.mark.unit
-    async def test_download_with_retry_custom_chunk_size(self, temp_checkpoint_dir: Path) -> None:
+    def test_download_with_retry_custom_chunk_size(self, temp_checkpoint_dir: Path) -> None:
         """Test download with custom chunk size."""
         dest_path = temp_checkpoint_dir / "chunk_test.bin"
         custom_chunk_size = 4096
         test_data = b"x" * (custom_chunk_size * 3)  # 3 chunks
-
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = Mock()
-        mock_response.headers = {"content-length": str(len(test_data))}
-
-        # Split data into chunks of custom size
         chunks = [test_data[i : i + custom_chunk_size] for i in range(0, len(test_data), custom_chunk_size)]
+        response = _mock_response(chunks)
 
-        # Create an async iterator for the chunk data
-        async def mock_chunk_iter(_chunk_size: int) -> AsyncGenerator[bytes, None]:
-            for chunk in chunks:
-                yield chunk
+        with patch("urllib.request.urlopen", return_value=response):
+            result_path = download_with_retry("https://example.com/chunk.bin", dest_path, chunk_size=custom_chunk_size)
 
-        # Use Mock to track calls while preserving async behavior
-        mock_response.content.iter_chunked = Mock(side_effect=mock_chunk_iter)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock the session.get() context manager
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock()
-        mock_session.get = Mock(return_value=mock_get_context)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("aiohttp.ClientSession") as mock_client_session:
-            mock_client_session.return_value = mock_session
-
-            result_path = await download_with_retry(
-                "https://example.com/chunk.bin",
-                dest_path,
-                chunk_size=custom_chunk_size,
-            )
-
-            assert result_path == dest_path
-            assert dest_path.exists()
-
-            # Verify chunk size was used in call
-            mock_response.content.iter_chunked.assert_called_with(custom_chunk_size)
+        assert result_path == dest_path
+        assert dest_path.read_bytes() == test_data
+        # Verify chunk size was used in call
+        response.read.assert_called_with(custom_chunk_size)
 
     @pytest.mark.unit
     @pytest.mark.slow
-    async def test_download_with_retry_large_file_simulation(self, temp_checkpoint_dir: Path) -> None:
+    def test_download_with_retry_large_file_simulation(self, temp_checkpoint_dir: Path) -> None:
         """Test download simulation with large file (performance test)."""
         dest_path = temp_checkpoint_dir / "large_simulation.bin"
 
@@ -272,39 +171,24 @@ class TestDownloadWithRetry:
         chunk_size = 8192
         num_chunks = 1280  # 10MB / 8KB
 
-        # Create an async generator function for large file chunks
-        async def mock_chunk_generator(chunk_size: int) -> AsyncGenerator[bytes, None]:
-            for _ in range(num_chunks):
-                yield b"x" * chunk_size
-
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = Mock()
-        mock_response.headers = {"content-length": str(num_chunks * chunk_size)}
-        mock_response.content.iter_chunked = mock_chunk_generator
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock the session.get() context manager
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock()
-        mock_session.get = Mock(return_value=mock_get_context)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("aiohttp.ClientSession") as mock_client_session:
-            mock_client_session.return_value = mock_session
-
+        with patch("urllib.request.urlopen", return_value=_mock_response([b"x" * chunk_size] * num_chunks)):
             start_time = time.time()
-            result_path = await download_with_retry("https://example.com/large.bin", dest_path, chunk_size=chunk_size)
+            result_path = download_with_retry("https://example.com/large.bin", dest_path, chunk_size=chunk_size)
             download_time = time.time() - start_time
 
-            assert result_path == dest_path
-            assert dest_path.exists()
-            # Should complete in reasonable time (< 5 seconds for simulation)
-            assert download_time < 5.0
+        assert result_path == dest_path
+        assert dest_path.exists()
+        # Should complete in reasonable time (< 5 seconds for simulation)
+        assert download_time < 5.0
+
+
+def _mock_response(chunks: list[bytes]) -> MagicMock:
+    """Make a mock ``urlopen`` response that returns ``chunks`` and then ``b""``."""
+    response = MagicMock()
+    response.headers = {"content-length": str(sum(len(c) for c in chunks))}
+    response.read = Mock(side_effect=[*chunks, b""])
+    response.__enter__.return_value = response
+    return response
 
 
 class TestValidateCheckpoint:
@@ -916,13 +800,13 @@ class TestUtilsIntegration:
 
     @pytest.mark.integration
     @pytest.mark.network
-    async def test_download_validate_cycle(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+    def test_download_validate_cycle(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
         """Test downloading and then validating a checkpoint."""
         dest_path = temp_checkpoint_dir / "downloaded_valid.bin"
 
         try:
             # Download file
-            await download_with_retry(network_urls["valid"], dest_path, max_retries=2, timeout=TIMEOUT)
+            download_with_retry(network_urls["valid"], dest_path, max_retries=2, timeout=TIMEOUT)
 
             assert dest_path.exists()
 
@@ -934,5 +818,37 @@ class TestUtilsIntegration:
             file_stat = dest_path.stat()
             assert file_stat.st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
+        except (TimeoutError, OSError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
+
+
+# --- download_with_retry error mapping, offline ---------------------------------------
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example.com/a.ckpt", code, "error", {}, None)
+
+
+def test_download_timeout_on_the_last_attempt_raises_timeout_error(tmp_path: Path) -> None:
+    """A timeout on the final attempt maps to CheckpointTimeoutError."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")), pytest.raises(CheckpointTimeoutError):
+        download_with_retry("https://example.com/model.ckpt", tmp_path / "model.ckpt", max_retries=1, timeout=5)
+
+
+def test_client_errors_are_not_retried_but_server_errors_are(tmp_path: Path) -> None:
+    """A 4xx response raises after one attempt; a 5xx response is retried up to max_retries."""
+    with (
+        patch("urllib.request.urlopen", side_effect=_http_error(404)) as urlopen_404,
+        patch("time.sleep"),
+        pytest.raises(CheckpointSourceError),
+    ):
+        download_with_retry("https://example.com/a.ckpt", tmp_path / "a.ckpt", max_retries=3, timeout=5)
+    assert urlopen_404.call_count == 1
+
+    with (
+        patch("urllib.request.urlopen", side_effect=_http_error(503)) as urlopen_503,
+        patch("time.sleep"),
+        pytest.raises(CheckpointSourceError),
+    ):
+        download_with_retry("https://example.com/b.ckpt", tmp_path / "b.ckpt", max_retries=2, timeout=5)
+    assert urlopen_503.call_count == 2
