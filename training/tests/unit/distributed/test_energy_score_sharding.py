@@ -29,7 +29,8 @@ from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.training.utils.enums import TensorDim
 
 GRID_SHARD_SIZES = [3, 2]
-<<<<<<< HEAD
+RANK_STACK_DUMP_SECONDS = 60
+TEST_TIMEOUT_SECONDS = 120
 LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
@@ -43,10 +44,6 @@ def _view(data: torch.Tensor) -> Source:
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
         layout=LAYOUT,
     )
-=======
-RANK_STACK_DUMP_SECONDS = 60
-TEST_TIMEOUT_SECONDS = 120
->>>>>>> origin/main
 
 
 def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
