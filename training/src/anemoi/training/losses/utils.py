@@ -15,15 +15,18 @@ from typing import TYPE_CHECKING
 
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.combined import CombinedLoss
+from anemoi.training.losses.scaler_tensor import as_dimension_tuple
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
 
 if TYPE_CHECKING:
     import numpy as np
+    import torch
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.base import BaseLoss
+    from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +36,37 @@ def reduce_to_last_dim(x: np.ndarray) -> np.ndarray:
     if x.ndim > 1:
         return x.sum(axis=tuple(range(x.ndim - 1)))
     return x
+
+
+def variable_axis_scaling(scaler: ScaleTensor) -> torch.Tensor | None:
+    """Return the product of every scaler that acts on the variable axis alone.
+
+    Scalers record the axes they apply to by `TensorDim` name, so the per-variable weight of a loss
+    is the product of the one-dimensional VARIABLE scalers it carries (`general_variable`,
+    `pressure_level`, the tendency scalers, ...). Scalers that span the variable axis *together with*
+    another axis have no single value per variable and are skipped.
+
+    Parameters
+    ----------
+    scaler : ScaleTensor
+        Scalers attached to the loss.
+
+    Returns
+    -------
+    torch.Tensor | None
+        A 1-D tensor of per-variable weights, or None when the loss carries no variable scaler.
+    """
+    combined = None
+    for name, (dims, values) in scaler.tensors.items():
+        dims = as_dimension_tuple(dims)
+        if TensorDim.VARIABLE not in dims:
+            continue
+        if len(dims) > 1:
+            LOGGER.debug("Scaler %r spans %s, so it has no single value per variable; skipping.", name, dims)
+            continue
+        flat = values.detach().reshape(-1).float()
+        combined = flat if combined is None else combined * flat
+    return combined
 
 
 def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dict[str, float]:
@@ -73,11 +107,17 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
         scaler_source = loss.scaler
 
-    variable_scaling = scaler_source.subset_by_dim(TensorDim.VARIABLE).get_scaler(len(TensorDim)).reshape(-1)
+    variable_scaling = variable_axis_scaling(scaler_source)
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
     for idx, name in subset_vars:
-        value = float(variable_scaling[idx]) if idx < variable_scaling.shape[0] else 1.0
+        if variable_scaling is None:
+            value = 1.0
+        elif variable_scaling.numel() == 1:
+            # A broadcast scaler applies the same weight to every variable.
+            value = float(variable_scaling[0])
+        else:
+            value = float(variable_scaling[idx]) if idx < variable_scaling.numel() else 1.0
         log_text += f"{name}: {value:.4g}, "
         scaling_values[name] = value
         scaling_sum += value

@@ -17,6 +17,9 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources.base import Source
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import PowerSpectrumLoss
@@ -29,6 +32,7 @@ N_VARIABLES = 3
 OCTAHEDRAL = {"transform": "octahedral_sht", "nlat": 8, "truncation": 3}
 OCTAHEDRAL_POINTS = 2 * (20 + 24 + 28 + 32)
 FFT2D = {"transform": "fft2d", "x_dim": 4, "y_dim": 4}
+LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 # (loss class, transform settings, grid points, ensemble size, length of the spectral dimension)
 CASES = [
@@ -41,6 +45,18 @@ CASES = [
     (LogSpectralDistance, FFT2D, 16, 1, 16),
     (FourierCorrelationLoss, FFT2D, 16, 1, 16),
 ]
+
+
+def _view(data: torch.Tensor) -> Source:
+    """Wrap a (batch, time, ensemble, grid, variables) tensor in the source view the loss takes."""
+    return GriddedSource(
+        name="data",
+        values=data,
+        variables=[f"v{i}" for i in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
+        layout=LAYOUT,
+    )
 
 
 def _uneven_grid_shard_sizes(n_points: int) -> list[int]:
@@ -76,18 +92,18 @@ def _check_sharded_spectral_losses(rank: int, init_file: str) -> None:
             grid_shard_slice = slice(start, start + grid_shard_sizes[rank])
 
             unsharded_pred = pred.clone().requires_grad_()
-            expected = loss(unsharded_pred, target, squash=False)
+            expected = loss(_view(unsharded_pred), _view(target), squash=False)
             expected.sum().backward()
 
             # Each rank's gradient should match the unsharded gradient on its own grid points.
             sharded_pred = pred[:, :, :, grid_shard_slice].clone().requires_grad_()
             actual = loss(
-                sharded_pred,
-                target[:, :, :, grid_shard_slice],
+                _view(sharded_pred),
+                _view(target[:, :, :, grid_shard_slice]),
                 squash=False,
                 grid_shard_slice=grid_shard_slice,
                 group=dist.group.WORLD,
-                grid_dim=TensorDim.GRID,
+                grid_dim=LAYOUT.axis(TensorDim.GRID),
                 grid_shard_sizes=grid_shard_sizes,
             )
             actual.sum().backward()
