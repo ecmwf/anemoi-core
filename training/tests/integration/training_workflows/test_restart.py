@@ -305,7 +305,8 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
     checkpoint alone: its metadata (variables, steps) and its supporting arrays (the grid).
     Inputs are random, in physical units: the model's normaliser takes them from there.
     """
-    model = torch.load(path, map_location="cpu", weights_only=False).eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = torch.load(path, map_location=device, weights_only=False).eval()
     assert model.graph_data is None, "the inference checkpoint is saved without the graph"
     metadata, supporting_arrays = load_metadata(str(path), supporting_arrays=True)
     metadata_inference = metadata["metadata_inference"]
@@ -327,11 +328,15 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
             "layout": ("time", "grid", "variables"),
         }
         grid = geometry["latitudes"].size
-        inputs[name] = {**geometry, "values": torch.randn(n_input, grid, len(input_names)), "variables": input_names}
+        inputs[name] = {
+            **geometry,
+            "values": torch.randn(n_input, grid, len(input_names), device=device),
+            "variables": input_names,
+        }
         templates[name] = {**geometry, "variables": output_names}
         forcings[name] = {
             **geometry,
-            "values": torch.randn(n_output, grid, len(forcing_names)),
+            "values": torch.randn(n_output, grid, len(forcing_names), device=device),
             "variables": forcing_names,
         }
         expected_shapes[name] = (n_output, grid, len(output_names))
