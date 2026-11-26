@@ -32,7 +32,7 @@ from anemoi.metadata.exceptions import VersionError
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
-def requires(min_version: str) -> Callable[[_F], _F]:
+def requires(min_version: str | None = None, max_version: str | None = None) -> Callable[[_F], _F]:
     """Gate a component adapter method on the version of its component.
 
     Use it on a method whose value older component versions do not record and
@@ -43,33 +43,56 @@ def requires(min_version: str) -> Callable[[_F], _F]:
     component version the checkpoint has (stamped or inferred).  Stack it
     under ``@property`` for a property.
 
+    If *max_version* is given, the method also raises
+    :class:`~anemoi.metadata.exceptions.VersionError` on adapters of newer
+    versions.
+
     Parameters
     ----------
-    min_version : str
+    min_version : str | None
         Oldest version of the component the method works with (e.g. ``"1.0"``).
+    max_version : str | None
+        Newest version of the component the method works with (e.g. ``"2.0"``).
 
     Raises
     ------
     VersionError
-        When called on an adapter of an older version, naming the component,
-        the required and the actual version.
+        When the adapter version is older than *min_version*, newer than
+        *max_version*, or missing; the message names the component, the
+        required and the actual version.
 
     Examples
     --------
     >>> class LineageV1_1(LineageV1_0):
     ...     @property
-    ...     @requires("1.1")
+    ...     @requires(min_version="1.1")
     ...     def new_value(self): ...
     """
-    minimum = Version(min_version)
+    minimum = Version(min_version) if min_version is not None else None
+    maximum = Version(max_version) if max_version is not None else None
+
+    if minimum is None and maximum is None:
+        message = "At least one of min_version or max_version must be specified."
+        raise ValueError(message)
+    if minimum is not None and maximum is not None and minimum > maximum:
+        message = "min_version cannot be greater than max_version."
+        raise ValueError(message)
 
     def decorator(func: _F) -> _F:
         @wraps(func)
         def wrapper(self: "ComponentAdapter", *args: Any, **kwargs: Any) -> Any:
             actual = getattr(self, "version", None)
             component = getattr(self, "component", type(self).__name__)
-            needs = f"{component}.{func.__name__} requires {component} version >= {min_version}"
-            if actual is None or Version(actual) < minimum:
+            needs = f"{component}.{func.__name__} requires {component} version"
+            if minimum is not None:
+                needs += f" >= {min_version}"
+            if maximum is not None:
+                needs += f" <= {max_version}"
+            if (
+                actual is None
+                or (minimum is not None and Version(actual) < minimum)
+                or (maximum is not None and Version(actual) > maximum)
+            ):
                 message = f"{needs}, but this checkpoint has {component} version {actual}"
                 raise VersionError(message)
             return func(self, *args, **kwargs)

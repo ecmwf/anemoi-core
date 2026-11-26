@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from anemoi.metadata.arrays import DatasetArrays
+from anemoi.metadata.components.base import requires
 from anemoi.metadata.exceptions import VersionError
 from anemoi.metadata.interface import DatasetData
 from anemoi.metadata.interface import DatasetSelectionError
@@ -512,6 +513,134 @@ class TestArrays:
     def test_repr(self, meta: Metadata) -> None:
         """repr() lists the array names."""
         assert repr(meta.dataset().arrays) == "DatasetArrays([])"
+
+    @pytest.mark.parametrize(
+        ("fixture", "dataset", "version"),
+        [
+            ("f0_ai_models", "data", "0.1"),
+            ("f1_single_dataset", "data", "0.1"),
+            ("f2_dev_scalar_index", "data", "0.2"),
+            ("f3_multi_dataset", None, "0.2"),
+            ("f8_richer_batch", "data", "1.0"),
+            ("f8_richer_batch", "obs", "1.0"),
+        ],
+    )
+    def test_arrays_carry_the_data_component_and_version(
+        self,
+        golden_loader: Callable[[str], dict[str, Any]],
+        fixture: str,
+        dataset: str | None,
+        version: str,
+    ) -> None:
+        """The arrays carry the component name and version of the dataset's data adapter, with or without arrays."""
+        m = Metadata.from_dict(golden_loader(fixture), supporting_arrays=None)
+        for name in [dataset] if dataset is not None else m.dataset_names:
+            adapter = m._raw.data(name)
+            arrays = m.dataset(name).arrays
+            assert arrays.component == adapter.component == "data"
+            assert arrays.version == adapter.version == version
+
+    def test_arrays_with_content_carry_the_version(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
+        """Arrays holding data carry the version too, not only the empty ones."""
+        m = Metadata.from_dict(golden_loader("f8_richer_batch"), supporting_arrays={"data": _arrays(4)})
+        assert len(m.dataset("data").arrays) > 0
+        assert m.dataset("data").arrays.version == "1.0"
+
+    def test_default_arrays_have_no_version(self) -> None:
+        """Arrays built on their own have no version, so a gated member raises."""
+        assert DatasetArrays().version is None
+        assert DatasetArrays(version="0.2").version == "0.2"
+        assert repr(DatasetArrays(version="0.2")) == "DatasetArrays([])"
+
+    def test_arrays_carry_the_new_version_after_with_overrides(self, meta: Metadata) -> None:
+        """Re-stamping the data component through with_overrides gives the new version, arrays kept."""
+        meta = Metadata.from_dict(meta.to_dict(), supporting_arrays={"data": _arrays(4)})
+        assert meta.dataset().arrays.version == "0.2"
+
+        patched = meta.with_overrides({"component_versions": {"data": "1.0"}})
+        assert patched.component_versions["data"] == "1.0"
+        arrays = patched.dataset().arrays
+        assert arrays.version == patched._raw.data("data").version == "1.0"
+        assert arrays.latitudes.shape == (4,)
+        # The original is unchanged.
+        assert meta.dataset().arrays.version == "0.2"
+
+    def test_arrays_keep_the_version_when_overriding_arrays(self, meta: Metadata) -> None:
+        """Replacing arrays through with_overrides does not lose the version."""
+        patched = meta.with_overrides({}, supporting_arrays={"data": _arrays(3)})
+        assert patched.dataset().arrays.latitudes.shape == (3,)
+        assert patched.dataset().arrays.version == "0.2"
+
+    def test_from_checkpoint_arrays_carry_the_version(
+        self,
+        empty_ckpt: Callable[..., Path],
+        multi_dict: dict[str, Any],
+    ) -> None:
+        """Arrays read back from a checkpoint are not empty and carry the data version."""
+        import anemoi.utils.checkpoints as checkpoints_utils
+
+        ckpt = empty_ckpt("version_arrays.ckpt")
+        checkpoints_utils.save_metadata(
+            str(ckpt),
+            multi_dict,
+            supporting_arrays={"era5": _arrays(6), "cerra": _arrays(4)},
+        )
+
+        m = Metadata.from_checkpoint(ckpt)
+        for name in ("era5", "cerra"):
+            arrays = m.dataset(name).arrays
+            assert len(arrays) > 0
+            assert arrays.component == "data"
+            assert arrays.version == m._raw.data(name).version == m.component_versions["data"] == "0.2"
+
+    def test_default_view_arrays_carry_the_adapter_version(
+        self,
+        golden_loader: Callable[[str], dict[str, Any]],
+    ) -> None:
+        """A DatasetView built with no arrays gets empty arrays with the data adapter's version."""
+        for fixture, version in [("f0_ai_models", "0.1"), ("f6_main", "0.2"), ("f8_richer_batch", "1.0")]:
+            raw_adapter = Metadata.from_dict(golden_loader(fixture))._raw
+            view = DatasetView(raw_adapter, raw_adapter.dataset_names[0])
+            assert len(view.arrays) == 0
+            assert view.arrays.component == "data"
+            assert view.arrays.version == raw_adapter.data(raw_adapter.dataset_names[0]).version == version
+
+    @pytest.fixture
+    def gated_arrays_class(self) -> type[DatasetArrays]:
+        """A test-only DatasetArrays subclass with a member gated on the data version."""
+
+        class GatedArrays(DatasetArrays):
+            @property
+            @requires(max_version="0.2")
+            def legacy_only(self) -> str:
+                return "legacy"
+
+        return GatedArrays
+
+    @pytest.mark.parametrize(
+        ("fixture", "passes"),
+        [("f0_ai_models", True), ("f2_dev_scalar_index", True), ("f8_richer_batch", False)],
+    )
+    def test_requires_gates_on_the_arrays_version(
+        self,
+        golden_loader: Callable[[str], dict[str, Any]],
+        gated_arrays_class: type[DatasetArrays],
+        fixture: str,
+        passes: bool,
+    ) -> None:
+        """``@requires(max_version="0.2")`` passes for data 0.1 and 0.2 and raises for 1.0."""
+        view = Metadata.from_dict(golden_loader(fixture)).dataset("data")
+        gated = gated_arrays_class(version=view.arrays.version)
+        if passes:
+            assert gated.legacy_only == "legacy"
+        else:
+            with pytest.raises(VersionError, match=r"data\.legacy_only requires data version <= 0\.2.*version 1\.0"):
+                gated.legacy_only
+
+    def test_requires_raises_without_a_version(self, gated_arrays_class: type[DatasetArrays]) -> None:
+        """Arrays without a version cannot satisfy any gate."""
+        with pytest.raises(VersionError, match=r"data\.legacy_only"):
+            gated_arrays_class().legacy_only
 
     def test_number_of_grid_points_precedence(self, raw: dict[str, Any]) -> None:
         """grid_indices, else latitudes, else the recorded grid size."""

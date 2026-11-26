@@ -25,6 +25,7 @@ import logging
 from collections.abc import Iterator
 from collections.abc import Mapping
 from typing import Any
+from typing import ClassVar
 
 import numpy as np
 
@@ -122,6 +123,19 @@ class DatasetArrays:
         The arrays of the dataset by name; ``None`` or empty when it has none.
         They are held as given (the caller passes copies); the view hands out
         a new copy on every access.
+    version : str | None, optional
+        Version of the dataset's data component (for example ``"0.2"``), as
+        read by :func:`~anemoi.metadata.components.base.requires` to gate
+        members on it.  ``None`` (the default) when unknown: a gated member
+        then always raises :class:`~anemoi.metadata.exceptions.VersionError`.
+        :class:`~anemoi.metadata.Metadata` sets it.
+
+    Attributes
+    ----------
+    component : str
+        Name of the component the arrays belong to: ``"data"``.
+    version : str | None
+        The data component version that ``@requires`` checks.
 
     Notes
     -----
@@ -130,8 +144,11 @@ class DatasetArrays:
     (:attr:`masks`).  Each is ``None`` when the dataset does not have it.
     """
 
-    def __init__(self, arrays: Mapping[str, np.ndarray] | None = None) -> None:
+    component: ClassVar[str] = "data"
+
+    def __init__(self, arrays: Mapping[str, np.ndarray] | None = None, *, version: str | None = None) -> None:
         self._arrays: dict[str, np.ndarray] = dict(arrays or {})
+        self.version = version
 
     def get(self, name: str) -> np.ndarray | None:
         """Return a copy of the array *name*, or ``None`` if the dataset has none."""

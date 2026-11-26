@@ -459,7 +459,8 @@ class DatasetView:
     name : str
         The dataset name this view is bound to.
     arrays : DatasetArrays | None, optional
-        The supporting arrays of the dataset; none when omitted.
+        The supporting arrays of the dataset; none when omitted.  When omitted,
+        the empty arrays carry the version of the dataset's data component.
 
     Examples
     --------
@@ -475,8 +476,9 @@ class DatasetView:
     def __init__(self, raw: "CheckpointAdapter", name: str, arrays: DatasetArrays | None = None) -> None:
         self._raw = raw
         self._name = name
-        self._arrays = arrays if arrays is not None else DatasetArrays()
-        self._data = DatasetData(raw.data(name))
+        data = raw.data(name)
+        self._arrays = arrays if arrays is not None else DatasetArrays(version=data.version)
+        self._data = DatasetData(data)
 
     @property
     def name(self) -> str:
@@ -706,7 +708,11 @@ class Metadata:
         elif name not in names:
             msg = f"Dataset {name!r} not found. Available datasets: {names!r}"
             raise KeyError(msg)
-        return DatasetView(self._raw, name, DatasetArrays(self._arrays.get(name)))
+        return DatasetView(
+            self._raw,
+            name,
+            DatasetArrays(self._arrays.get(name), version=self._raw.data(name).version),
+        )
 
     @property
     def datasets(self) -> dict[str, DatasetView]:
