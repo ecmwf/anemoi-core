@@ -272,6 +272,9 @@ REAL_F6 = "real-f6/inference-last.ckpt.json"
 #: Same for anemoi-training at commit 127c10618 (2026-10-06, before the task moved into metadata_inference).
 REAL_F4 = "real-f4/inference-last.ckpt.json"
 
+#: Same for anemoi-training after richer-batch (#1435, format "3.0"; run of 2026-11-26).
+REAL_F8 = "real-f8/inference-last.ckpt.json"
+
 #: Fixture -> real source: ``("checkpoint", key)`` or ``("file", path relative to --sources)``.
 REAL_SOURCES: dict[str, tuple[str, str]] = {
     **{name: ("checkpoint", key) for name, key in F1_FROM_CHECKPOINT.items()},
@@ -283,6 +286,7 @@ REAL_SOURCES: dict[str, tuple[str, str]] = {
     "f4_task_top_level.json": ("file", REAL_F4),
     "f5_offsets.json": ("file", f"{INF_INTEGRATION}/rmi-lam/metadata.json"),
     "f6_main.json": ("file", REAL_F6),
+    "f8_richer_batch.json": ("file", REAL_F8),
 }
 
 
@@ -579,10 +583,10 @@ def build_f5(sources: Path) -> None:
     write("f5_offsets.json", f5)
 
 
-def build_f6_f8(sources: Path) -> None:
+def build_f6(sources: Path) -> None:
     real_f6 = sources / REAL_F6
     if not real_f6.is_file():
-        print(f"SKIPPED f6_main.json, f6_warm_start.json, f8_richer_batch.json: {REAL_F6} not found")
+        print(f"SKIPPED f6_main.json, f6_warm_start.json: {REAL_F6} not found")
         return
 
     # ---- F6: real training main run (see README) ------------------------------------------------
@@ -603,11 +607,17 @@ def build_f6_f8(sources: Path) -> None:
     ]
     write("f6_warm_start.json", warm)
 
-    # ---- F8: richer-batch. One gridded dataset (from F6) and one synthetic tabular dataset -----
-    f8 = copy.deepcopy(f6)
-    f8["version"] = "3.0"
-    f8["timestamp"] = "2026-11-23T00:00:00.000000+00:00"
-    f8["provenance_training"]["time"] = "2026-11-23T00:00:00.000000"
+
+def build_f8(sources: Path) -> None:
+    """F8 (richer-batch, #1435, format "3.0"): a real training run plus one synthetic tabular dataset."""
+    real_f8 = sources / REAL_F8
+    if not real_f8.is_file():
+        print(f"SKIPPED f8_richer_batch.json: {REAL_F8} not found")
+        return
+
+    # The real run has one gridded dataset, "data". The tabular "obs" dataset below is synthetic.
+    f8 = trim_common(load(real_f8))
+    check_index_collection(f8)
 
     obs_names = ["2t", "2d", "msl", "cos_julian_day", "sin_julian_day", "tp"]
     obs_types = {
@@ -621,10 +631,6 @@ def build_f6_f8(sources: Path) -> None:
     mi = f8["metadata_inference"]
     task = mi.pop("task")
     gridded = mi["data"]
-    grid_size = f8["dataset"]["data"]["shape"][-1]
-    # 3.0 no longer carries shapes (the model's fill_metadata is empty on the richer-batch branch)
-    gridded.pop("shapes")
-    mi["data"] = {"data_type": "gridded", "grid_size": grid_size, **gridded}
     mi["obs"] = metadata_inference_block(
         obs_ic,
         obs_types,
@@ -635,6 +641,8 @@ def build_f6_f8(sources: Path) -> None:
     mi["task"] = task
 
     f8["dataset"]["obs"] = {}
+    # save_metadata writes an empty entry for a dataset without supporting arrays
+    f8["supporting_arrays_paths"]["obs"] = {}
     f8["data_indices"]["obs"] = obs_ic
     f8["config"]["data"]["datasets"]["obs"] = {
         "forcing": obs_types["forcing"],
@@ -647,7 +655,6 @@ def build_f6_f8(sources: Path) -> None:
             "start": f8["config"]["dataloader"][part]["datasets"]["data"].get("start"),
             "end": f8["config"]["dataloader"][part]["datasets"]["data"].get("end"),
         }
-    f8["uuid"] = "6f1d1a64-3c0b-4f7e-9d63-2a7c9a1f4e10"
     write("f8_richer_batch.json", f8)
 
 
@@ -688,7 +695,8 @@ def main() -> int:
     build_f2_f3(sources)
     build_f4(sources)
     build_f5(sources)
-    build_f6_f8(sources)
+    build_f6(sources)
+    build_f8(sources)
     return 0
 
 

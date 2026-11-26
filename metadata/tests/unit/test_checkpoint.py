@@ -37,7 +37,7 @@ from anemoi.utils.checkpoints import DEPRECATED_NAME
 
 @pytest.fixture
 def f6(golden_loader: Callable[[str], dict[str, Any]]) -> dict:
-    """The F6 golden metadata (what training main writes, version ``2.0``): a fresh dict per test.
+    """The F6 golden metadata (what training wrote before richer-batch, version ``2.0``): a fresh dict per test.
 
     ``supporting_arrays_paths`` is dropped: it points at array files that these test checkpoints do not contain,
     so loading would fail.  The low-level writer sets it itself when arrays are given.

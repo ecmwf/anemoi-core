@@ -27,9 +27,9 @@ were read or copied.
 | `f3_temporal_downscaler.json` | F3 | `"2.0"` | inference `temporal-downscaler/metadata.json` | 2026-02-11 | real | 18 |
 | `f4_task_top_level.json` | F4 | `"2.0"` | anemoi-training 127c10618 local run, `test_metadata` (`real-f4/inference-last.ckpt.json`) | 2026-11-23 (run of a 2026-10-06 commit) | real | 39 |
 | `f5_offsets.json` | F5 | `"2.0"` | inference `rmi-lam/metadata.json` | 2026-10-21 | real | 32 |
-| `f6_main.json` | F6 | `"2.0"` | anemoi-training main local run, `tests/integration` `test_metadata` (`real-f6/inference-last.ckpt.json`) | 2026-11-23 | real | 39 |
+| `f6_main.json` | F6 | `"2.0"` | anemoi-training main (before richer-batch) local run, `tests/integration` `test_metadata` (`real-f6/inference-last.ckpt.json`) | 2026-11-23 | real | 39 |
 | `f6_warm_start.json` | F6 | `"2.0"` | `f6_main` plus a lineage entry | 2026-11-23 | synthetic variant | 39 |
-| `f8_richer_batch.json` | F8 | `"3.0"` | `f6_main` plus richer-batch writers | 2026-11-23 | synthetic | 41 |
+| `f8_richer_batch.json` | F8 | `"3.0"` | anemoi-training after richer-batch (#1435), `tests/integration` `test_metadata` (`real-f8/inference-last.ckpt.json`), plus a synthetic tabular `obs` dataset | 2026-11-26 | real (gridded) + synthetic obs | 41 |
 
 "inference" files are from anemoi-inference `main` (`tests/integration/*/metadata.json` and
 `tests/unit/checkpoints/*`).
@@ -56,11 +56,11 @@ were read or copied.
   9ced7fa32, which moved `task` into `metadata_inference`).
 - `f5_offsets`: `offset-forecaster` with `input_offsets`, `output_offsets`, `rollout_shift`, `advance_map`,
   `base_seed`; `shapes.grid` is null.
-- `f6_main`: what training main writes today. Top-level `version "2.0"`, `base_seed`, `checkpoint_lineage` `[]` and no
+- `f6_main`: what training wrote before richer-batch (#1435). Top-level `version "2.0"`, `base_seed`, `checkpoint_lineage` `[]` and no
   `parent_uuid` (fresh run), `uuid`, `model`, `tracker` `{"null": null}`, `training`, `supporting_arrays_paths`;
   `config.task` (`Forecaster`, `multistep_input` 2, `multistep_output` 1, `timestep` "6H", `rollout`,
-  `validation_rollout`); `metadata_inference.task` "forecaster". `metadata_inference.<ds>.shapes` is still written
-  (anemoi-models main `fill_metadata`). Plain forecaster, so offsets are covered by `f5_offsets` only.
+  `validation_rollout`); `metadata_inference.task` "forecaster". `metadata_inference.<ds>.shapes` is written
+  (the model's `fill_metadata` of that time). Plain forecaster, so offsets are covered by `f5_offsets` only.
 
 ## Remaining synthetic files
 
@@ -75,13 +75,15 @@ were read or copied.
 - `f6_warm_start`: `f6_main` with `checkpoint_lineage` `[{"loading_strategy": "warm_start", "parent_uuid": <id>}]`
   and a scalar `parent_uuid` (inserted before `uuid`) as `training/.../checkpoint/lineage.py`
   (`record_checkpoint_lineage`) writes them. The parent id is made up. Everything else is the real F6.
-- `f8_richer_batch`: `f6_main` with `version "3.0"`, `timestamp` 2026-11-23 and the richer-batch writers
-  (`data/datamodule.py:282-311`, `readers/gridded.py`, `readers/tabular.py`, `train/train.py:465-492`): `shapes`
-  removed from `metadata_inference.data` (richer-batch's `fill_metadata` is empty); `data` gets `data_type "gridded"`
-  and `grid_size` 40320 (last axis of `dataset.data.shape`); `obs` is tabular (`grid_size` null) with six made-up
-  variables, `dataset.obs` is `{}`, no `obs` entry in `supporting_arrays_paths`, the same `timesteps` as `data`, no
-  `shapes`; `config` entries for `obs` are stubs; `uuid` is made up. `data_indices.obs` is built by a helper that
-  `build_fixtures.py` checks against the real F5 and F6 indices. No real richer-batch checkpoint was available.
+- `f8_richer_batch`: the real `test_metadata` run of anemoi-training after richer-batch (#1435, 2026-11-26), trimmed
+  like `f6_main`, with one synthetic dataset added. The real part (writers `data/datamodule.py:282-311`,
+  `readers/gridded.py`, `train/train.py:465-492`): `version "3.0"`, no `shapes` (the models' `fill_metadata` is
+  empty), no `component_versions`, and for the gridded `data` dataset `data_type "gridded"`, `grid_size` 40320,
+  `data_indices`, `variable_types` and `timesteps`; `uuid`, `timestamp` and `run_id` are the real ones. The synthetic
+  part: `obs` is tabular (`grid_size` null) with six made-up variables, `dataset.obs` is `{}`, `supporting_arrays_paths.obs`
+  is `{}` (as `save_metadata` writes it for a dataset without arrays), the same `timesteps` as `data`, no `shapes`;
+  the `config` entries for `obs` are stubs. `data_indices.obs` is built by a helper that `build_fixtures.py` checks
+  against the real F5, F6 and F8 indices. No real checkpoint with a tabular dataset was available.
 
 ## What was trimmed (all files)
 
@@ -109,10 +111,12 @@ were read or copied.
 ## Refresh and structure check
 
 The sources are not in this repository. `<dir>` holds anemoi-inference `main` as `inf-main/` and the metadata JSON of
-two real training runs: `real-f6/inference-last.ckpt.json` (training main) and `real-f4/inference-last.ckpt.json`
-(training at commit 127c10618). Each is `anemoi-metadata/anemoi.json` extracted from the inference checkpoint that
-the `tests/integration` `test_metadata` run produces. Without the F6 file, `f6_main`, `f6_warm_start` and
-`f8_richer_batch` are skipped; without the F4 file, `f4_task_top_level` is. Also get the two public checkpoints
+three real training runs: `real-f8/inference-last.ckpt.json` (training with richer-batch, format "3.0"),
+`real-f6/inference-last.ckpt.json` (training just before richer-batch) and `real-f4/inference-last.ckpt.json`
+(training at commit 127c10618). Each is the metadata JSON (`anemoi-metadata/anemoi.json`) of the inference
+checkpoint that the `tests/integration` `test_metadata` run produces. Without the F6 file, `f6_main` and
+`f6_warm_start` are skipped; without the F8 file, `f8_richer_batch` is; without the F4 file, `f4_task_top_level` is.
+Also get the two public checkpoints
 (`aifs-ens-crps-2.0.ckpt`, `aifs-subs-crps-0.1.ckpt`) into one directory (or pass `--ens` and `--subs`
 explicitly), then from `metadata/`:
 
@@ -128,5 +132,5 @@ keys collapsed, `config` followed to depth 2, other keys to depth 6. It fails wh
 the source is missing or different in the fixture, unless trimming removes it on purpose (provenance, config groups
 and keys outside the keep lists, bulk keys in the nested dataset chains). It also fails when any `data_request`,
 `constant_fields` or `frequency` anywhere in `dataset` is lost, and when a kept `config` key is missing or has another
-type. Synthetic files (`f0_*`, `f2_early`, `f6_warm_start`, `f8_richer_batch`) are not checked; `f6_main` is checked
-against the real run, and `f1_null_diagnostic` against its source (which has fewer keys than the fixture). After changing the trimming rules, rebuild and run the check.
+type. Synthetic files (`f0_*`, `f2_early`, `f6_warm_start`) are not checked; `f6_main` and `f8_richer_batch` (whose
+added `obs` dataset is ignored) are checked against their real runs, and `f1_null_diagnostic` against its source (which has fewer keys than the fixture). After changing the trimming rules, rebuild and run the check.

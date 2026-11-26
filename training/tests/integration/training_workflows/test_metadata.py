@@ -50,8 +50,9 @@ def test_metadata_reading(gnn_config: tuple[DictConfig, str], get_test_archive: 
     for checkpoint in to_check:
         metadata = Metadata.from_checkpoint(checkpoint)
 
-        assert metadata.version == "2.0", checkpoint.name
-        assert metadata.component_versions == {"data": "0.2", "task": "0.2", "lineage": "1.0"}, checkpoint.name
+        # Training writes format "3.0" without component_versions; the package infers 1.0 for each component
+        assert metadata.version == "3.0", checkpoint.name
+        assert metadata.component_versions == {"data": "1.0", "task": "1.0", "lineage": "1.0"}, checkpoint.name
         assert metadata.dataset_names == ["data"], checkpoint.name
 
         task = metadata.task
@@ -71,6 +72,8 @@ def test_metadata_reading(gnn_config: tuple[DictConfig, str], get_test_archive: 
         dataset = metadata.dataset("data")
         data = dataset.data
         assert data.data_type() == "gridded", checkpoint.name
+        # Grid of the pinned test archive dataset
+        assert data.grid_size() == 40320, checkpoint.name
 
         latitudes, longitudes = dataset.arrays.latitudes, dataset.arrays.longitudes
         assert latitudes is not None and longitudes is not None, checkpoint.name

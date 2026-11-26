@@ -72,30 +72,30 @@
    "validation_rollout": 2
   }
  },
- "seed": 2102982546,
- "base_seed": 567166687,
- "run_id": "cbe2a8e3-87a2-4bf5-83fd-6ca34970ec82",
+ "seed": 3460687569,
+ "base_seed": 265741890,
+ "run_id": "2a0d1895-c5f1-41e9-a715-0091f6c7c8a0",
  "provenance_training": {
-  "time": "2026-11-23T00:00:00.000000",
-  "python": "3.13.12",
+  "time": "2026-11-26T13:43:44.825468",
+  "python": "3.12.7",
   "module_versions": {
-   "anemoi.datasets": {"version": "0.5.42"},
+   "anemoi.datasets": {"version": "0.5.50"},
    "anemoi.models": {"version": "0.20.0.post50"},
    "anemoi.training": {"version": "0.17.2.post50"},
-   "anemoi.utils": {"version": "0.5.12"},
-   "numpy": {"version": "2.5.2"},
-   "torch": {"version": "2.10.0"}
+   "anemoi.utils": {"version": "0.5.14"},
+   "numpy": {"version": "2.5.5"},
+   "torch": {"version": "2.11.0"}
   },
   "distribution_names": {},
   "git_versions": {
    "anemoi.training": {"git": {"sha1": "0000000000000000000000000000000000000000", "modified_files": 0, "untracked_files": 0}}
   }
  },
- "timestamp": "2026-11-23T00:00:00.000000+00:00",
+ "timestamp": "2026-11-26T13:43:50.243300+00:00",
  "metadata_inference": {
-  "seed": 2102982546,
-  "base_seed": 567166687,
-  "run_id": "cbe2a8e3-87a2-4bf5-83fd-6ca34970ec82",
+  "seed": 3460687569,
+  "base_seed": 265741890,
+  "run_id": "2a0d1895-c5f1-41e9-a715-0091f6c7c8a0",
   "dataset_names": ["data", "obs"],
   "data": {
    "data_type": "gridded",
@@ -142,10 +142,12 @@
  "checkpoint_lineage": [],
  "dataset": {
   "data": {
-   "version": "0.5.42",
+   "version": "0.5.50",
    "arguments": {
-    "args": [{"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h"}],
-    "kwargs": {"start": null, "end": "2017-01-08 12:00:00"}
+    "args": [
+     {"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h", "start": null, "end": "2017-01-08 12:00:00"}
+    ],
+    "kwargs": {}
    },
    "specific": {
     "action": "subset",
@@ -262,7 +264,7 @@
      "dtype": "float32",
      "path": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
     },
-    "reason": {"end": "2017-01-08 12:00:00", "frequency": "6h"}
+    "reason": {"frequency": "6h", "end": "2017-01-08 12:00:00"}
    },
    "frequency": "6h",
    "variables": ["10u", "10v", "2d", "2t", "cos_julian_day", "cos_latitude", "cos_local_time", "cos_longitude", "cp", "insolation", "lsm", "msl", "q_100", "q_1000", "q_150", "q_200", "q_250", "q_300", "q_400", "q_50", "q_500", "q_600", "q_700", "q_850", "q_925", "sdor", "sin_julian_day", "sin_latitude", "sin_local_time", "sin_longitude", "skt", "slor", "sp", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_850", "t_925", "tcw", "tp", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_850", "u_925", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_850", "v_925", "w_100", "w_1000", "w_150", "w_200", "w_250", "w_300", "w_400", "w_50", "w_500", "w_600", "w_700", "w_850", "w_925", "z", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"],
@@ -649,14 +651,15 @@
    }
   }
  },
- "uuid": "6f1d1a64-3c0b-4f7e-9d63-2a7c9a1f4e10",
+ "uuid": "0338a6fb-ba8e-4236-af31-311fe14922c8",
  "model": {"model": "AnemoiModelInterface", "trainable_parameters": 2549672, "total_parameters": 2549672, "summary": "(torchinfo summary removed)"},
  "tracker": {"null": null},
- "training": {"current_epoch": 1, "global_step": 6, "elapsed_time": 85.70771217346191},
+ "training": {"current_epoch": 1, "global_step": 6, "elapsed_time": 113.38574123382568},
  "supporting_arrays_paths": {
   "data": {
    "latitudes": {"path": "inference-last/anemoi-metadata/data/latitudes.numpy", "shape": [40320], "dtype": "float64"},
    "longitudes": {"path": "inference-last/anemoi-metadata/data/longitudes.numpy", "shape": [40320], "dtype": "float64"}
-  }
+  },
+  "obs": {}
  }
 }

@@ -69,14 +69,15 @@ oldest checkpoints have no ``version``.
        are told apart by content: F2 is the first multi-dataset form; F3 adds
        the input and output relative date indices; F4 has ``task`` at the top
        level; F5 adds flexible timestepping (forecaster offsets); F6 is what
-       training writes today (``metadata_inference.task``, ``base_seed``,
-       ``uuid``, ``checkpoint_lineage``, ``tracker`` and more; ``parent_uuid``
-       after a warm start).
+       training wrote before the richer batch (``metadata_inference.task``,
+       ``base_seed``, ``uuid``, ``checkpoint_lineage``, ``tracker`` and more;
+       ``parent_uuid`` after a warm start).
    * - F8
      - ``"3.0"``
-     - Richer batch.  F6 plus a ``data_type`` (``"gridded"`` or
-       ``"tabular"``) and a ``grid_size`` per dataset.  Tabular datasets have
-       an empty ``dataset`` entry and no supporting arrays.
+     - Richer batch, what training writes today.  F6 plus a ``data_type``
+       (``"gridded"`` or ``"tabular"``) and a ``grid_size`` per dataset, and no
+       ``shapes``.  Tabular datasets have an empty ``dataset`` entry and no
+       supporting arrays.
    * - F9
      - ``"3.1"``
      - Written by this package.  The 3.0 layout plus ``component_versions``
