@@ -91,3 +91,107 @@ to the icosahedron outside and inside the area of interest respectively.
 
    This class will require the `trimesh <https://trimesh.org>`_ package
    to be installed. You can install it with `pip install trimesh`.
+
+**************************
+ Adaptive stretched graph
+**************************
+
+The class `AdaptiveStretchedTriNodes` builds the same mesh as `StretchedTriNodes`
+and then adds nodes where an attribute of your choice has large
+gradients inside the area of interest. The attribute is read from the
+reference nodes, so those nodes must come first in the graph config. For
+every edge of the ``lam_resolution`` icosahedron
+whose two end nodes are among those with the largest gradients, a node
+is added at the edge midpoint. With surface geopotential, for example,
+this halves the local node spacing over complex
+terrain without refining the whole area of interest.
+
+.. code:: yaml
+
+   nodes:
+     data:
+       node_builder: ...
+       attributes:
+         z_orog:
+           _target_: anemoi.graphs.nodes.attributes.AnemoiDatasetVariableWeights
+           variable: z
+           norm: unit-max
+     hidden: # name of the nodes
+       node_builder:
+         _target_: anemoi.graphs.nodes.AdaptiveStretchedTriNodes
+         global_resolution: 7
+         lam_resolution: 10
+         reference_node_name: data
+         reference_node_attr_name: z_orog
+         gradient_threshold_percentile: 75  # optional, refines the top 25%
+         gradient_num_neighbours: 12  # optional
+         mask_attr_name: cutout_mask  # optional
+         margin_radius_km: 100  # optional
+       attributes: ...
+
+The gradient at each point comes from a plane fitted to its
+``gradient_num_neighbours`` nearest reference nodes. The result depends
+on the resolution of the reference nodes: a field on a grid coarser
+than the mesh gives smoother gradients.
+
+The added nodes are vertices of the ``lam_resolution + 1`` icosahedron,
+so the nodes support `MultiScaleEdges` with ``scale_resolutions:
+lam_resolution + 1``. Nodes with a gradient of 0 are never refined.
+
+.. warning::
+
+   This class will require the `trimesh <https://trimesh.org>`_ package
+   to be installed. You can install it with `pip install trimesh`.
+
+**************************************
+ Field-following nodes without a grid
+**************************************
+
+Two more builders place nodes according to the gradient of an attribute
+of the reference nodes, without keeping the icosahedron structure. Neither supports
+`MultiScaleEdges`, so connect their nodes with `KNNEdges` or
+`CutOffEdges`.
+
+`ProbabilisticStretchedTriNodes` builds the same mesh as
+`StretchedTriNodes` and adds ``extra_nodes_percent`` % more nodes inside
+the area of interest. Candidates on a 0.02° grid are taken from the
+largest gradient to the smallest, and each is kept only if it is at
+least ``min_dist_factor`` times the ``lam_resolution`` node spacing from
+every other node. Nodes with a gradient of 0 are skipped.
+
+.. code:: yaml
+
+   nodes:
+     hidden:
+       node_builder:
+         _target_: anemoi.graphs.nodes.ProbabilisticStretchedTriNodes
+         global_resolution: 7
+         lam_resolution: 10
+         reference_node_name: data
+         reference_node_attr_name: z_orog
+         extra_nodes_percent: 10  # optional
+         min_dist_factor: 0.5  # optional
+
+`ProbabilisticNodes` builds a free-form mesh with a fixed number of
+nodes inside and outside the area of interest. Candidates are visited in
+a random order that favours large gradients, with weights ``(g + 1e-6)
+** (1 / compression)`` where ``g`` is the gradient relative to its
+maximum, and each is kept if it is at least ``min_dist_km`` from every
+node placed so far. A small ``compression`` (e.g. 0.1) concentrates the
+nodes where the gradient is large; a large one (e.g. 10) spreads them
+uniformly.
+
+.. code:: yaml
+
+   nodes:
+     hidden:
+       node_builder:
+         _target_: anemoi.graphs.nodes.ProbabilisticNodes
+         reference_node_name: data
+         reference_node_attr_name: z_orog
+         num_nodes_global: 40000
+         num_nodes_lam: 60000
+         compression_global: 10
+         compression_lam: 0.1
+         min_dist_km: 5  # optional
+         random_seed: 42  # optional
