@@ -148,5 +148,5 @@ class DataLoaderSchema(PydanticBaseModel):
     "Default trajectory anchor sampling used across all splits. stride=None → non-overlapping; stride=N → step N."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"
-    blosc_threads: PositiveInt | None = Field(default=8)
+    blosc_threads: PositiveInt | None = Field(default=4)
     "Number of blosc threads in each dataloader worker. If None, blosc uses one thread in a worker."
