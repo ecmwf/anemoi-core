@@ -114,9 +114,11 @@ the others.
      - checkpoint
      - ``metadata_inference.task`` and the per-dataset ``timesteps``.  The
        adapter is chosen by task name too (``forecaster``,
-       ``offset-forecaster``, ``temporal-downscaler``, ``time-interpolator``,
-       ``timeless``, ``autoencoder``).  An unknown task name uses the generic
-       task adapter and warns.
+       ``offset-forecaster``, ``temporal-downscaler``, ``timeless``,
+       ``autoencoder``).  ``time-interpolator`` is an alias of
+       ``temporal-downscaler``: older checkpoints record temporal downscalers
+       under that name and are read with the same adapter.  An unknown task
+       name uses the generic task adapter and warns.
    * - ``lineage``
      - checkpoint
      - ``uuid``, ``parent_uuid`` and ``checkpoint_lineage``: where the

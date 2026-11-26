@@ -156,7 +156,6 @@ class TestRegistration:
             "forecaster",
             "offset-forecaster",
             "temporal-downscaler",
-            "time-interpolator",
             "timeless",
         ]
 

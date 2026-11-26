@@ -23,8 +23,8 @@ from anemoi.metadata.components.task import TaskTiming
 from anemoi.metadata.components.task import TaskTimingError
 from anemoi.metadata.components.task import TaskV0_2
 from anemoi.metadata.components.task import TemporalDownscalerV0_2
-from anemoi.metadata.components.task import TimeInterpolatorV0_2
-from anemoi.metadata.components.task import effective_task_name
+from anemoi.metadata.components.task import TemporalDownscalerV1_0
+from anemoi.metadata.components.task import build_task_adapter
 from anemoi.metadata.components.task import register_task_version
 from anemoi.metadata.formats import component_versions
 from anemoi.metadata.registry import ComponentRegistry
@@ -36,7 +36,7 @@ ZERO = datetime.timedelta(0)
 def make_task(raw: dict[str, Any]) -> TaskAdapter:
     """Build the task adapter chosen for *raw* the way the registry selects it: by task name and version."""
     version = component_versions(raw)["task"]
-    return ComponentRegistry.resolve("task", version, name=effective_task_name(raw))(raw)
+    return build_task_adapter(raw, version)
 
 
 def timesteps_of(raw: dict[str, Any], dataset: str = "data") -> dict[str, Any]:
@@ -52,7 +52,7 @@ class TestRegistration:
     @pytest.mark.parametrize("version", ["0.2", "1.0"])
     @pytest.mark.parametrize(
         "name",
-        ["forecaster", "offset-forecaster", "temporal-downscaler", "time-interpolator", "timeless", "autoencoder"],
+        ["forecaster", "offset-forecaster", "temporal-downscaler", "timeless", "autoencoder"],
     )
     def test_named_adapters_exist_for_both_versions(
         self,
@@ -125,7 +125,7 @@ class TestRegistration:
         [
             ("f3_single_dataset", "ForecasterV0_2"),
             ("f5_offsets", "OffsetForecasterV0_2"),
-            ("f3_temporal_downscaler", "TimeInterpolatorV0_2"),
+            ("f3_temporal_downscaler", "TemporalDownscalerV0_2"),
             ("f8_richer_batch", "ForecasterV1_0"),
         ],
     )
@@ -136,6 +136,26 @@ class TestRegistration:
         cls: str,
     ) -> None:
         assert type(make_task(golden_loader(fixture))).__name__ == cls
+
+    @pytest.mark.parametrize(
+        ("version", "cls"),
+        [("0.2", TemporalDownscalerV0_2), ("1.0", TemporalDownscalerV1_0)],
+    )
+    def test_time_interpolator_is_read_as_temporal_downscaler(
+        self,
+        golden_loader: Callable[[str], dict[str, Any]],
+        version: str,
+        cls: type[TaskAdapter],
+    ) -> None:
+        """``time-interpolator`` is an alias: same class, no warning, recorded name kept."""
+        raw = golden_loader("f3_temporal_downscaler")
+        raw["metadata_inference"]["task"] = "time-interpolator"
+        raw["component_versions"] = {"task": version}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            task = make_task(raw)
+        assert type(task) is cls
+        assert task.task_name == "time-interpolator"
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +340,7 @@ class TestTemporalDownscalerTiming:
     def test_f3_temporal_downscaler(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
         raw = golden_loader("f3_temporal_downscaler")
         task = make_task(raw)
-        assert type(task) is TimeInterpolatorV0_2
+        assert type(task) is TemporalDownscalerV0_2
         assert task.timestep() == "6h"
         assert task.input_relative_date_indices() == [0, 2]
         assert task.output_relative_date_indices() == [1, 2]
@@ -333,7 +353,7 @@ class TestTemporalDownscalerTiming:
         assert task.advance_map is None
 
     def test_explicit_times_and_lagged_look_ahead(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
-        """Lagged is the input times in data frequency (6h here), so it looks ahead."""
+        """Lagged is the input times in data frequency (6h here), so it looks ahead (temporal downscaler)."""
         task = make_task(golden_loader("f3_temporal_downscaler"))
         assert task.input_explicit_times == [0, 2]
         assert task.target_explicit_times == [1, 2]

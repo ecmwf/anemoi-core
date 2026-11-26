@@ -30,9 +30,11 @@ behaviours are:
   from the timestep and the number of input and output steps;
 * ``offset-forecaster``: the same values are stored by training and read as is
   (``rollout_shift`` is the last output offset when not stored);
-* ``temporal-downscaler`` and ``time-interpolator``: boundary inputs at
-  ``0`` and one timestep; ``lagged`` looks ahead, from the input explicit
-  times and the data frequency;
+* ``temporal-downscaler``: boundary inputs at ``0`` and one timestep;
+  ``lagged`` looks ahead, from the input explicit times and the data
+  frequency.  ``time-interpolator`` is an alias of it (see
+  :data:`TASK_NAME_ALIASES`): older checkpoints record temporal downscalers
+  under that name, and they are read as ``temporal-downscaler``;
 * ``autoencoder`` and ``timeless``: a single snapshot, timestep ``0H``.
 
 The task name is read from ``metadata_inference.task``, else the top-level
@@ -732,10 +734,6 @@ class TemporalDownscalerBehaviour(TaskAdapter):
         return extra
 
 
-class TimeInterpolatorBehaviour(TemporalDownscalerBehaviour):
-    """Time interpolator: the name under which temporal downscalers were also written."""
-
-
 class TimelessBehaviour(TaskAdapter):
     """Timeless task: input and output are one snapshot at ``t=0`` and the timestep is ``0H``."""
 
@@ -766,10 +764,13 @@ TASK_BEHAVIOURS: dict[str | None, type[TaskAdapter] | None] = {
     "forecaster": ForecasterBehaviour,
     "offset-forecaster": OffsetForecasterBehaviour,
     "temporal-downscaler": TemporalDownscalerBehaviour,
-    "time-interpolator": TimeInterpolatorBehaviour,
     "timeless": TimelessBehaviour,
     "autoencoder": AutoencoderBehaviour,
 }
+
+#: Task names read as another task name: older checkpoints record temporal downscalers
+#: under ``time-interpolator``.  The recorded name is kept by :func:`task_name`.
+TASK_NAME_ALIASES: dict[str, str] = {"time-interpolator": "temporal-downscaler"}
 
 
 # --------------------------------------------------------------------------
@@ -835,8 +836,9 @@ def register_task_version(
 def build_task_adapter(raw: Mapping[str, object], version: str) -> TaskAdapter:
     """Build the task adapter of a checkpoint: the version reader of *version* and the task's behaviour.
 
-    The task is chosen with :func:`effective_task_name`; a name without an
-    adapter of its own uses the generic one, with a warning.
+    The task is chosen with :func:`effective_task_name`, read through
+    :data:`TASK_NAME_ALIASES`; a name without an adapter of its own uses the
+    generic one, with a warning.
 
     Parameters
     ----------
@@ -845,7 +847,9 @@ def build_task_adapter(raw: Mapping[str, object], version: str) -> TaskAdapter:
     version : str
         The task component version (stamped or inferred).
     """
-    adapter_cls = cast("type[TaskAdapter]", ComponentRegistry.resolve("task", version, name=effective_task_name(raw)))
+    name = effective_task_name(raw)
+    name = TASK_NAME_ALIASES.get(name, name)
+    adapter_cls = cast("type[TaskAdapter]", ComponentRegistry.resolve("task", version, name=name))
     return adapter_cls(raw)
 
 
@@ -857,7 +861,6 @@ TaskV0_2 = _V0_2[None]
 ForecasterV0_2 = _V0_2["forecaster"]
 OffsetForecasterV0_2 = _V0_2["offset-forecaster"]
 TemporalDownscalerV0_2 = _V0_2["temporal-downscaler"]
-TimeInterpolatorV0_2 = _V0_2["time-interpolator"]
 TimelessV0_2 = _V0_2["timeless"]
 AutoencoderV0_2 = _V0_2["autoencoder"]
 
@@ -865,6 +868,5 @@ TaskV1_0 = _V1_0[None]
 ForecasterV1_0 = _V1_0["forecaster"]
 OffsetForecasterV1_0 = _V1_0["offset-forecaster"]
 TemporalDownscalerV1_0 = _V1_0["temporal-downscaler"]
-TimeInterpolatorV1_0 = _V1_0["time-interpolator"]
 TimelessV1_0 = _V1_0["timeless"]
 AutoencoderV1_0 = _V1_0["autoencoder"]
