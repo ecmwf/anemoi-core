@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.21.2](https://github.com/ecmwf/anemoi-core/compare/models-0.21.1...models-0.21.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **training:** Only rank0 writes graph ([#1622](https://github.com/ecmwf/anemoi-core/issues/1622)) ([f522396](https://github.com/ecmwf/anemoi-core/commit/f5223964f7d86a5a19329e86f78505d935f186b8))
+
 ## [0.21.1](https://github.com/ecmwf/anemoi-core/compare/models-0.21.0...models-0.21.1) (2026-11-27)
 
 
