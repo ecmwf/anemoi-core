@@ -261,11 +261,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.val_metric_ranges = {}  # dict of dict of lists
         self._scaling_values_log = {}  # dict of dict[str, float]
         self.loss = torch.nn.ModuleDict()
-        self.loss = {} # loss becomes a dictionary for dynamic loss loading from CPU to GPU
+        self.loss = {}  # loss becomes a dictionary for dynamic loss loading from CPU to GPU
         self.metrics = torch.nn.ModuleDict()
-        self.metrics = {} # metrics becomes a dictionary for dynamic loss loading from CPU to GPU
+        self.metrics = {}  # metrics becomes a dictionary for dynamic loss loading from CPU to GPU
         self._current_gpu_dataset = None  # track which dataset's loss/metrics are on GPU
-        
+
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = self._build_loss_configs()
 
@@ -851,11 +851,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             )
 
         return loss, metrics_next, y_pred
-    
-    def _ensure_loss_metrics_on_gpu(self, dataset_name: str) -> None:
-        """ Move loss and metrics for the given dataset to GPU if they are not already there.
 
-        Also move the loss and metrics of the previous dataset off GPU if any. 
+    def _ensure_loss_metrics_on_gpu(self, dataset_name: str) -> None:
+        """Move loss and metrics for the given dataset to GPU if they are not already there.
+
+        Also move the loss and metrics of the previous dataset off GPU if any.
         This saves memory when using many datasets by keeping only the active dataset's
         loss metrics on the GPU.
 
@@ -864,10 +864,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dataset_name : str
             Dataset name for which to ensure loss and metrics are on GPU
         """
-
         if self._current_gpu_dataset_name == dataset_name:
             return  # Already on GPU
-        
+
         if self._current_gpu_dataset_name is not None:
             # Move previous dataset's loss and metrics to CPU
             if self._current_gpu_dataset_name in self.loss:
@@ -875,7 +874,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if self._current_gpu_dataset_name in self.metrics:
                 for metric in self.metrics[self._current_gpu_dataset_name].values():
                     metric.to("cpu")
-        
+
         if dataset_name in self.loss:
             self.loss[dataset_name] = self.loss[dataset_name].to(self.device)
         if dataset_name in self.metrics:
