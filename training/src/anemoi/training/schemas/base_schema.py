@@ -314,7 +314,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_frequency_null_for_trajectory_datasets(self) -> Self:
         """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
-        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+        from anemoi.training.schemas.dataloader import TrajectoryDataReaderSchema
 
         all_splits = [
             self.dataloader.training,
@@ -322,7 +322,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
             self.dataloader.test,
         ]
         uses_trajectory = any(
-            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            isinstance(dataset, TrajectoryDataReaderSchema) and dataset.trajectory is not None
             for split in all_splits
             for dataset in split.values()
         )
@@ -340,6 +340,37 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
             self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
+        return self
+
+    @model_validator(mode="after")
+    def check_training_condition_matches_transport_objective(self) -> Self:
+        """Check that the training distribution of the noise level or time suits the model's objective.
+
+        The objective is set in the model config and the distribution in the training config, so a model of one
+        objective can be combined with the training config of the other; this catches it before anything is built.
+        """
+        transport = getattr(self.training, "transport", None)
+        model_transport = getattr(self.model.model, "transport", None)
+        if transport is None or model_transport is None:
+            return self
+        # Imported here: the distribution registries live with the model code.
+        from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
+        from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
+
+        registries = {"edm_diffusion": SIGMA_TRAINING_DISTRIBUTIONS, "flow_matching": TIME_TRAINING_DISTRIBUTIONS}
+        objective = model_transport.objective
+        distribution = transport.training_condition.get("distribution")
+        allowed = registries.get(objective, {})
+        if distribution not in allowed:
+            # The entry configs set the objective and the training distribution together.
+            msg = (
+                f"model.model.transport.objective is {objective!r}, but training.transport.training_condition."
+                f"distribution is {distribution!r}, which is not one of its distributions "
+                f"({', '.join(sorted(allowed))}). Set both as the entry configs do: transport.yaml and "
+                "multi_transport.yaml for edm_diffusion, transport_flow_matching.yaml for flow_matching."
+            )
+            error = "transport_training_condition_mismatch"
+            raise PydanticCustomError(error, msg)
         return self
 
     @model_validator(mode="after")

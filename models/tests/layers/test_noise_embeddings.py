@@ -261,6 +261,17 @@ class TestSinusoidalEmbeddings:
         frequencies = embedder.frequencies
         assert torch.all(frequencies[:-1] >= frequencies[1:])
 
+    def test_scale_multiplies_the_frequencies(self):
+        """A scale stretches the input: embedding t with scale s equals embedding s * t with scale 1."""
+        x = torch.rand(6, 1)
+        plain = SinusoidalEmbeddings(num_channels=32, max_period=1000)
+        scaled = SinusoidalEmbeddings(num_channels=32, max_period=1000, scale=1000.0)
+
+        assert scaled.frequencies[0].item() == pytest.approx(1000.0)
+        torch.testing.assert_close(scaled.frequencies, 1000.0 * plain.frequencies)
+        # Arguments of up to about 1000 radians: float32 rounding moves sin and cos by up to ~1e-4.
+        torch.testing.assert_close(scaled(x), plain(1000.0 * x), atol=1e-3, rtol=0)
+
 
 class TestNoiseEmbeddingsComparison:
     """Test suite comparing the two noise embedding methods."""

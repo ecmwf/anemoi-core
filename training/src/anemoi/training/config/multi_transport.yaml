@@ -1,0 +1,30 @@
+# The two-dataset setup of multi.yaml, with a transport model trained with EDM diffusion.
+defaults:
+- multi
+- override model: graphtransformer_multi_transport
+- override training: multi_transport
+- _self_
+
+# EDM diffusion. The tendency model is graphtransformer_multi_transport_tendency (model=...).
+model:
+  model:
+    transport:
+      objective: edm_diffusion
+      inference_defaults:
+        sampling_schedule:
+          schedule_type: karras
+          sigma_max: 100.0
+          sigma_min: 0.02
+          rho: 7.0
+          num_steps: 50
+        sampler:
+          sampler: heun
+
+training:
+  transport:
+    # Noise level drawn once per sample and ensemble member during training.
+    training_condition:
+      distribution: karras
+      sigma_max: 100.0
+      sigma_min: 0.02
+      rho: 7.0

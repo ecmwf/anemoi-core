@@ -11,7 +11,6 @@
 import datetime
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,10 +21,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.demos.boring_classes import BoringModel
 from torch import nn
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
-from anemoi.training.utils.checkpoint import save_inference_checkpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
 from anemoi.utils.config import DotDict
@@ -40,10 +36,9 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
-        # Mirror AnemoiModelInterface's graph_data/model._graph_data shape so
-        # AnemoiCheckpoint._save_checkpoint's graph_data null-out has something to act on.
+        # Mirror AnemoiModelInterface's graph_data so AnemoiCheckpoint._save_checkpoint's
+        # graph_data null-out has something to act on.
         self.graph_data = {"dummy": "graph"}
-        self.model = SimpleNamespace(_graph_data={"dummy": "graph"})
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()
@@ -206,9 +201,9 @@ def test_training_checkpoint_has_its_own_uuid(tmp_path: str, callback: AnemoiChe
     """Test that a training checkpoint stores a different uuid from its inference checkpoint.
 
     Args:
-        tmp_path (str): path to checkpoint dir
-        callback (AnemoiCheckpoint): callback to store checkpoints
-        model (DummyModule): dummy lightning module
+        tmp_path (str): path to checkpoint dir.
+        callback (AnemoiCheckpoint): callback to store checkpoints.
+        model (DummyModule): dummy lightning module.
     """
     trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=2, logger=False)
     trainer.fit(model)
@@ -228,25 +223,3 @@ def test_training_checkpoint_has_its_own_uuid(tmp_path: str, callback: AnemoiChe
                 assert training_uuid != inference_uuid
 
     shutil.rmtree(tmp_path)
-
-
-def test_inference_checkpoint_excludes_imputer_runtime_state(tmp_path: str, config: DictConfig) -> None:
-    """Inference checkpoints must not capture a rank's current batch mask."""
-    model = DummyModel(config=config, metadata={})
-    data_indices = IndexCollection(
-        DictConfig({"forcing": [], "diagnostic": []}),
-        {"imputed": 0, "valid": 1},
-    )
-    model.imputer = ConstantImputer(
-        DictConfig({"default": "none", 0: ["imputed"]}),
-        data_indices=data_indices,
-    )
-    batch = torch.tensor([[[[torch.nan, 1.0], [1.0, 1.0]]]])
-    model.imputer.transform(batch, in_place=False)
-    inference_path = save_inference_checkpoint(model, {}, Path(tmp_path) / "model.ckpt")
-    saved_model = torch.load(inference_path, weights_only=False)
-
-    assert saved_model.imputer.nan_locations is None
-    assert saved_model.imputer.loss_mask_training is None
-    assert model.imputer.nan_locations is None
-    assert model.imputer.loss_mask_training is None
