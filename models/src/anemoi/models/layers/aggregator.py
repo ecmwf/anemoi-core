@@ -239,47 +239,43 @@ class PointwiseCrossAttentionAggregator(BaseLatentAggregator):
 
 
 class GatedLatentFusion(nn.Module):
-    """Gated fusion block that folds an encoder latent into a running latent.
+    """Gated residual block that folds an encoder latent into a running latent.
 
-    Both tensors are node-aligned (same nodes, same channels), so the block works
-    pointwise: the two layer-normalised latents are concatenated and fed to a
-    sigmoid gate ("how much") and a two-layer MLP ("what"). The result is added
-    to the running latent as a gated residual (Flamingo-style), so the block can
-    learn to be a no-op.
+    Both tensors are node-aligned, so the block works pointwise: the two
+    layer-normalised latents are concatenated and fed to a sigmoid gate and a
+    two-layer MLP. The result is added to the running latent as a gated
+    residual.
 
     Weights are shared across nodes; the parameter count depends only on
-    ``hidden_dim``.
+    ``hidden_dim`` and ``input_dim``.
 
     Parameters
     ----------
     hidden_dim : int
-        Channel dimension of both latents.
+        Channels of the running latent and of the output.
+    input_dim : int, optional
+        Channels of the encoder latent. Defaults to ``hidden_dim``.
     value_init_scale : float, optional
-        Multiply the default initialisation of the value MLP's output
-        projection weight by this factor and zero its bias, so the block
-        starts as (near-)identity while the gate stays open. Closing the
-        sigmoid gate instead would saturate it and stall learning. Default
-        None (default initialisation).
-
-        ``0.0`` makes the block an exact identity at initialisation. Its
-        output then does not depend on ``encoder_output``, so the encoder
-        feeding it gets no gradient at first.
+        Scale the initial weights of the value MLP's output layer and zero its
+        bias. ``0.0`` starts the block as an exact identity; the encoder then
+        gets no gradient at first.
     """
 
-    def __init__(self, hidden_dim: int, value_init_scale: float | None = None) -> None:
+    def __init__(self, hidden_dim: int, input_dim: int | None = None, value_init_scale: float | None = None) -> None:
         super().__init__()
+        input_dim = hidden_dim if input_dim is None else input_dim
         if value_init_scale is not None and value_init_scale < 0:
             raise ValueError(f"value_init_scale must be non-negative, got {value_init_scale}.")
         # Separate norms: the running latent and a fresh encoder output have
         # different scales and distributions.
         self.norm_latent = nn.LayerNorm(hidden_dim)
-        self.norm_input = nn.LayerNorm(hidden_dim)
+        self.norm_input = nn.LayerNorm(input_dim)
         self.to_gate = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Linear(hidden_dim + input_dim, hidden_dim),
             nn.Sigmoid(),
         )
         self.to_value = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Linear(hidden_dim + input_dim, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
@@ -289,20 +285,7 @@ class GatedLatentFusion(nn.Module):
                 self.to_value[-1].bias.zero_()
 
     def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
-        """Fold ``encoder_output`` into the running ``latent``.
-
-        Parameters
-        ----------
-        latent : Tensor
-            Running latent, shape (nodes, hidden_dim).
-        encoder_output : Tensor
-            Encoder latent to incorporate, shape (nodes, hidden_dim).
-
-        Returns
-        -------
-        Tensor
-            Updated latent, shape (nodes, hidden_dim).
-        """
+        """Fold ``encoder_output`` (nodes, input_dim) into ``latent`` (nodes, hidden_dim)."""
         combined = torch.cat([self.norm_latent(latent), self.norm_input(encoder_output)], dim=-1)
         gate = self.to_gate(combined)
         value = self.to_value(combined)
@@ -310,29 +293,11 @@ class GatedLatentFusion(nn.Module):
 
 
 class GatedFusionAggregator(BaseLatentAggregator):
-    """Fold auxiliary latents into the principal latent through learned sigmoid gates.
+    """Fold auxiliary latents into the principal latent, one gated block per source.
 
-    The principal source's latent is the running latent; every other active
-    source is merged into it by its own :class:`GatedLatentFusion` block
-    (sequential, one block per auxiliary source). Auxiliary sources may be
-    absent at call time, the principal source may not. While training, the
-    merge order is shuffled to avoid order dependence; in eval mode the
-    configured source order is used.
-
-    All sources must share the same channel dimension, which is also the
-    output width.
-
-    With ``value_init_scale=0.0`` every fusion block starts as an exact
-    identity, so a dataset added to a trained model (e.g. through transfer
-    learning, where its block is missing from the checkpoint) leaves the
-    model's predictions unchanged at the start of fine-tuning. The new
-    dataset's encoder then gets no gradient at first.
-
-    ```
-    latent_aggregator:
-      _target_: anemoi.models.layers.aggregator.GatedFusionAggregator
-      principal_source: data
-    ```
+    Auxiliary sources may be absent at call time and may differ in width; the
+    output width is the principal source's. The merge order is shuffled in
+    training and follows the configured order in eval.
     """
 
     def __init__(
@@ -349,24 +314,19 @@ class GatedFusionAggregator(BaseLatentAggregator):
             source_channels=source_channels,
             gradient_checkpointing=gradient_checkpointing,
         )
-        self._hidden_dim = next(iter(self.source_channels.values()))
-        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
-            raise ValueError(
-                f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
-                f"got {self.source_channels}.",
-            )
-
         self.principal_source = principal_source if principal_source is not None else self.source_names[0]
         if self.principal_source not in self.source_channels:
             raise ValueError(
                 f"{self.__class__.__name__}: principal_source {self.principal_source!r} "
                 f"is not one of the latent sources {self.source_names}.",
             )
+        self._hidden_dim = self.source_channels[self.principal_source]
 
         self.fusion = nn.ModuleDict(
             {
                 name: GatedLatentFusion(
                     hidden_dim=self._hidden_dim,
+                    input_dim=self.source_channels[name],
                     value_init_scale=value_init_scale,
                 )
                 for name in self.source_names

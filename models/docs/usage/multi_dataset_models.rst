@@ -213,7 +213,9 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    its own ``GatedLatentFusion`` block, which adds
    ``sigmoid(gate) * MLP([LN(latent), LN(source)])`` as a residual.
    Because the gate can close, a block can learn to be a no-op.
-   Requires a common channel dimension. With three or more datasets,
+   Dataset latents may have different channel dimensions; the output
+   width is that of the principal dataset and must match the processor
+   width. With three or more datasets,
    the merge order of the non-principal dataset latents is shuffled during training and follows
    the configured order in evaluation.
 
