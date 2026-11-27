@@ -8,10 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 
+import numpy as np
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.processors.post_process import RemoveEdgesCrossingArea
+from anemoi.graphs.processors.post_process import RemoveEdgesOutsideArea
 from anemoi.graphs.processors.post_process import RemoveSelfEdges
 from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
 from anemoi.graphs.processors.post_process import RestrictEdgeLength
@@ -187,3 +190,64 @@ def test_subset_nodes_in_area(graph_long_and_short_edges: HeteroData):
     assert graph["test_nodes"].num_nodes == 2
     # test the processor removes the edges from/to removed nodes
     assert torch.all(graph["test_nodes", "to", "test_nodes"].edge_index == torch.tensor([[0], [1]]))
+
+
+@pytest.fixture
+def graph_crossing_a_pole() -> HeteroData:
+    """Graph with 4 nodes on a meridian and 3 edges, only one of them crossing the north pole."""
+    graph = HeteroData()
+    # Latitudes, in radians, at 0º, 45º, 89º and -45º longitude 0.
+    graph["test_nodes"].x = torch.tensor([[0.0, 0.0], [np.pi / 4, 0.0], [np.pi / 2 - 0.02, 0.0], [-np.pi / 4, 0.0]])
+    graph["test_nodes"].mask = torch.tensor([True, True, False, True]).unsqueeze(-1)
+    # The restricted area is a cap around the north pole, marked on the reference nodes.
+    graph["reference_nodes"].x = torch.tensor([[np.pi / 2, 0.0], [0.0, 0.0], [-np.pi / 2, 0.0]])
+    graph["reference_nodes"].is_pole = torch.tensor([True, False, False]).unsqueeze(-1)
+    # (2 -> 3) goes over the north pole, (0 -> 1) and (0 -> 3) do not.
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[2, 0, 0], [3, 1, 3]])
+    graph["test_nodes", "to", "test_nodes"].edge_attr = torch.tensor([[1.0], [2.0], [3.0]])
+    return graph
+
+
+def test_remove_edges_crossing_area(graph_crossing_a_pole: HeteroData):
+    """Test only the edge crossing the restricted area is removed."""
+    processor = RemoveEdgesCrossingArea("test_nodes", "test_nodes", "reference_nodes", "is_pole", num_middle_points=3)
+    graph = processor.update_graph(graph_crossing_a_pole)
+
+    assert torch.equal(graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[0, 0], [1, 3]]))
+
+
+def test_remove_edges_crossing_area_with_masks(graph_crossing_a_pole: HeteroData):
+    """Test the edge crossing the restricted area is kept when its source node is masked out."""
+    processor = RemoveEdgesCrossingArea(
+        "test_nodes",
+        "test_nodes",
+        "reference_nodes",
+        "is_pole",
+        num_middle_points=3,
+        source_mask_attr_name="mask",
+        target_mask_attr_name="mask",
+    )
+    graph = processor.update_graph(graph_crossing_a_pole)
+
+    assert torch.equal(graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[2, 0, 0], [3, 1, 3]]))
+
+
+def test_remove_edges_outside_area(graph_crossing_a_pole: HeteroData):
+    """Test the complementary processor removes the edges leaving the restricted area.
+
+    The attribute is inverted, so here the restricted area is everything but the pole cap. No
+    edge stays inside the cap, not even the one crossing it, so all of them are removed.
+    """
+    processor = RemoveEdgesOutsideArea("test_nodes", "test_nodes", "reference_nodes", "is_pole", num_middle_points=3)
+    graph = processor.update_graph(graph_crossing_a_pole)
+
+    assert graph["test_nodes", "to", "test_nodes"].edge_index.shape[1] == 0
+
+
+@pytest.mark.parametrize("num_middle_points", [0, -1])
+def test_fail_remove_edges_crossing_area(num_middle_points: int):
+    """Test RemoveEdgesCrossingArea initialization with an invalid number of middle points."""
+    with pytest.raises(ValueError, match="num_middle_points must be >= 1"):
+        RemoveEdgesCrossingArea(
+            "test_nodes", "test_nodes", "reference_nodes", "is_pole", num_middle_points=num_middle_points
+        )
