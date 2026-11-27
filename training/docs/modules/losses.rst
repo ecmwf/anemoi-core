@@ -30,6 +30,8 @@ The following loss functions are available by default:
 -  ``MAELoss``: mean-absolute-error.
 -  ``HuberLoss``: Huber loss.
 -  ``LogCoshLoss``: log-cosh loss.
+-  ``BinaryCrossEntropyLoss``: binary cross-entropy with an optional focal
+   term, for predicted probabilities (see below).
 -  ``CombinedLoss``: Combined component weighted loss.
 
 ``MSELoss``, ``MAELoss``, ``HuberLoss`` and ``LogCoshLoss`` also apply
@@ -60,6 +62,63 @@ reference it in the config as follows:
             # loss class to initialise
             _target_: anemoi.training.losses.MSELoss
             scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+*********************************
+ Binary Cross-Entropy and Focal
+*********************************
+
+``BinaryCrossEntropyLoss`` is intended for rare 0/1 fields, such as a
+mask. The prediction must be a **probability in [0, 1]**, not a logit,
+for example the output of a sigmoid bounding on that variable. The
+target must be in [0, 1], so the variable should not be normalised
+(``none`` normaliser). The options are:
+
+-  ``focal_gamma`` (default 0): focusing parameter of the focal loss. 0
+   gives the plain binary cross-entropy; larger values down-weight points
+   that are already predicted well.
+-  ``alpha`` (default unset): weight ``alpha`` on positives and ``1 -
+   alpha`` on negatives.
+-  ``pos_weight`` (default 1): extra factor on the positive term.
+-  ``eps`` (default 1e-6): the prediction is clamped to ``[eps, 1 -
+   eps]``, so saturated predictions of exactly 0 or 1 give a finite loss
+   (and no gradient on the clamped side).
+
+The loss is computed in float32 with autocast disabled. Points where the
+target is NaN are excluded from the loss and from its normalisation (the
+result is the scaler-weighted mean over the valid points), whatever
+``ignore_nans`` is; with ``ignore_nans: true`` points where the
+prediction is NaN are excluded too.
+
+.. warning::
+
+   Only the plain loss (``focal_gamma: 0``, no ``alpha``, ``pos_weight:
+   1``) is minimised by the calibrated probability. With ``focal_gamma``,
+   ``alpha`` or ``pos_weight`` the trained output is a **score**, not a
+   calibrated probability: it ranks points, a decision threshold has to
+   be chosen on validation data, and it should not be read as a
+   probability.
+
+As the loss averages over the variables it covers, use it as a child of
+``CombinedLoss`` with ``predicted_variables`` to apply it to one variable
+only, next to other losses on the remaining variables:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.combined.CombinedLoss
+            losses:
+               - _target_: anemoi.training.losses.MSELoss
+                 predicted_variables: [2t, 10u, 10v]
+                 scalers: [general_variable, nan_mask_weights, node_weights]
+               - _target_: anemoi.training.losses.BinaryCrossEntropyLoss
+                 predicted_variables: [tc_mask]
+                 focal_gamma: 2.0
+                 alpha: 0.25
+                 scalers: [general_variable, nan_mask_weights, node_weights]
+                 ignore_nans: true
+            loss_weights: [1.0, 1.0]
 
 ******************************
  Probabilistic Loss Functions

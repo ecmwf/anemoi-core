@@ -262,6 +262,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
+    bce = "anemoi.training.losses.BinaryCrossEntropyLoss"
     fcl = "anemoi.training.losses.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
@@ -543,6 +544,17 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class BinaryCrossEntropyLossSchema(BaseLossSchema):
+    focal_gamma: float = Field(default=0.0, ge=0.0)
+    "Focusing parameter of the focal term, 0 gives the plain binary cross-entropy."
+    alpha: float | None = Field(default=None, ge=0.0, le=1.0)
+    "Weight alpha on positives and 1 - alpha on negatives, no class balancing if not set."
+    pos_weight: float = Field(default=1.0, gt=0.0)
+    "Extra factor on the positive term."
+    eps: float = Field(default=1e-6, gt=0.0, lt=0.5)
+    "Predictions are clamped to [eps, 1 - eps]."
+
+
 class SpectralProjectionConfigSchema(BaseModel):
     """Configuration for sparse projection applied before the spectral transform.
 
@@ -645,6 +657,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.BinaryCrossEntropyLoss": "bce",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -671,6 +684,7 @@ class CombinedLossSchema(BaseLossSchema):
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
+            | Annotated[BinaryCrossEntropyLossSchema, Tag("bce")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
             | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
@@ -730,6 +744,7 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[BinaryCrossEntropyLossSchema, Tag("bce")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]

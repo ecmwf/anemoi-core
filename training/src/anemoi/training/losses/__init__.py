@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .aggregate import TimeAggregateLossWrapper
+from .bce import BinaryCrossEntropyLoss
 from .combined import CombinedLoss
 from .energy_score import EnergyScoreLoss
 from .graph_edge_crps import GraphEdgeCRPSLoss
@@ -32,6 +33,7 @@ from .variable_mapper import LossVariableMapper
 
 __all__ = [
     "CRPS",
+    "BinaryCrossEntropyLoss",
     "CombinedLoss",
     "EnergyScoreLoss",
     "FourierCorrelationLoss",
