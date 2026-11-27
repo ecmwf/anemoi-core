@@ -96,3 +96,8 @@ def test_timedeltas_node_schema_validation():
 def test_timedeltas_node_schema_rejects_invalid_settings(config):
     with pytest.raises(ValidationError):
         TypeAdapter(NodeAttributeSchemas).validate_python(config)
+
+
+def test_timedeltas_name_defaults_and_override():
+    assert Timedeltas().name == "timedeltas"
+    assert Timedeltas(name="obs_dt").name == "obs_dt"

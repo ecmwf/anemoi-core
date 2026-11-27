@@ -173,7 +173,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             for attribute_name, attribute_config in (node_config.get("attributes") or {}).items():
                 if attribute_config.get("_target_") != timedelta_target:
                     continue
-                runtime_attributes[attribute_name] = instantiate(attribute_config)
+                runtime_attributes[attribute_name] = instantiate(attribute_config, name=attribute_name)
 
             if runtime_attributes:
                 self.dynamic_node_attributes[dataset_name] = runtime_attributes

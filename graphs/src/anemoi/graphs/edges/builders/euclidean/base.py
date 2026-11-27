@@ -46,6 +46,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
         backend: Literal["auto", "sklearn"] = "auto",
+        attributes: list | None = None,
     ):
         assert backend in ("auto", "sklearn"), "Backend must be 'auto' or 'sklearn'."
         self.backend = backend
@@ -54,6 +55,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             target_name=target_name,
             source_mask_attr_name=source_mask_attr_name,
             target_mask_attr_name=target_mask_attr_name,
+            attributes=attributes,
         )
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:

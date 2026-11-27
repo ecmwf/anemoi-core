@@ -14,6 +14,7 @@ from .builders.from_file import TextNodes
 from .builders.from_file import XArrayNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
+from .builders.from_icon import BaseICONNodeBuilder
 from .builders.from_icon import ICONCellGridNodes
 from .builders.from_icon import ICONMultiMeshNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
@@ -38,6 +39,7 @@ __all__ = [
     "ReducedGaussianGridNodes",
     "StretchedTriNodes",
     "ICONMultiMeshNodes",
+    "BaseICONNodeBuilder",
     "ICONCellGridNodes",
     "TextNodes",
     "XArrayNodes",

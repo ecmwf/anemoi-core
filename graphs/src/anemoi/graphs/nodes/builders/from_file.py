@@ -18,6 +18,7 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import AreaMaskBuilder
+from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -37,13 +38,13 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: DictConfig, name: str) -> None:
+    def __init__(self, dataset: DictConfig | str, name: str, attributes: list[BaseNodeAttribute] | None = None) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         if not isinstance(dataset, str):
             # Drop unset options, as the training data readers do,
@@ -51,7 +52,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
             options = OmegaConf.to_container(dataset) if isinstance(dataset, DictConfig) else dict(dataset)
             dataset = {key: value for key, value in options.items() if value is not None}
         self.dataset = dataset
-        super().__init__(name)
+        super().__init__(name=name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
@@ -81,12 +82,19 @@ class TextNodes(BaseNodeBuilder):
         The index of the latitude in the dataset.
     """
 
-    def __init__(self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
+    def __init__(
+        self,
+        dataset: str | Path,
+        name: str,
+        idx_lon: int = 0,
+        idx_lat: int = 1,
+        attributes: list[BaseNodeAttribute] | None = None,
+    ) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
         self.idx_lat = idx_lat
-        super().__init__(name)
+        super().__init__(name=name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -118,9 +126,9 @@ class NPZFileNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
@@ -130,6 +138,7 @@ class NPZFileNodes(BaseNodeBuilder):
         name: str,
         lat_key: str = "latitudes",
         lon_key: str = "longitudes",
+        attributes: list[BaseNodeAttribute] | None = None,
     ) -> None:
         """Initialize the NPZFileNodes builder.
 
@@ -145,11 +154,13 @@ class NPZFileNodes(BaseNodeBuilder):
             Name of the key of the latitude arrays. Defaults to "latitudes".
         lon_key : str, optional
             Name of the key of the latitude arrays. Defaults to "longitudes".
+        attributes : list[BaseNodeAttribute], optional
+            List of attributes. Defaults to None.
         """
         self.npz_file = Path(npz_file)
         self.lat_key = lat_key
         self.lon_key = lon_key
-        super().__init__(name)
+        super().__init__(name=name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -177,16 +188,17 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         lon_key: str = "longitudes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(npz_file, name, lat_key, lon_key)
+        super().__init__(npz_file, name, lat_key, lon_key, attributes)
 
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
+        super().register_nodes(graph)
 
-    def get_coordinates(self) -> np.ndarray:
+    def get_coordinates(self) -> torch.Tensor:
         coords = super().get_coordinates()
 
         LOGGER.info(
@@ -224,15 +236,21 @@ class XArrayNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
-
-        super().__init__(name)
+    def __init__(
+        self,
+        dataset: str,
+        name: str,
+        lat_key: str = "lat",
+        lon_key: str = "lon",
+        attributes: list[BaseNodeAttribute] | None = None,
+    ) -> None:
+        super().__init__(name=name, attributes=attributes)
         self.dataset = dataset
         self.lat_key = lat_key
         self.lon_key = lon_key

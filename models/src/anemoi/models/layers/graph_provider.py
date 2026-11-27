@@ -428,7 +428,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         """
         super().__init__()
         self.edge_builder = instantiate(edge_builder_config[0], source_name="-", target_name="-")
-        self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
+        self.attributes_config = {k: instantiate(v, name=k) for k, v in edge_attributes_configs.items()}
         self._edge_dim = sum(attr.ndim for attr in self.attributes_config.values())
         self._capture_request: tuple[str, str] | None = None
         self._captured_graph: HeteroData | None = None
