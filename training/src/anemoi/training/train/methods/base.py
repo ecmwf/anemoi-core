@@ -40,6 +40,7 @@ from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.forcing_mask import ForcingMask
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import BaseMask
 from anemoi.training.utils.masks import create_output_masks
@@ -254,6 +255,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.model.supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         self.data_indices = data_indices
+
+        self.forcing_masks = self._build_forcing_masks(config, data_indices)
 
         # `task` holds runtime objects that cannot be deepcopied by Lightning's
         # `save_hyperparameters` and are not meaningful to persist in the
@@ -470,6 +473,52 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    supports_forcing_mask: bool = True
+
+    def _build_forcing_masks(
+        self,
+        config: BaseSchema,
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, ForcingMask]:
+        """Build and validate the optional ``training.forcing_mask`` of each dataset."""
+        forcing_mask_config = config.training.get("forcing_mask", None)
+        if forcing_mask_config is None:
+            return {}
+        if not self.supports_forcing_mask:
+            msg = f"training.forcing_mask is not supported by {type(self).__name__}."
+            raise ValueError(msg)
+
+        forcing_masks = {}
+        for dataset_name, dataset_config in get_multiple_datasets_config(forcing_mask_config).items():
+            if dataset_config is None:
+                continue
+            if dataset_name not in data_indices:
+                msg = f"training.forcing_mask: unknown dataset '{dataset_name}' (datasets: {list(data_indices)})."
+                raise ValueError(msg)
+            forcing_mask = ForcingMask.from_config(OmegaConf.to_container(dataset_config, resolve=True))
+            forcing_mask.validate(data_indices[dataset_name], dataset_name)
+            LOGGER.info("Dataset %s: %s", dataset_name, forcing_mask)
+            forcing_masks[dataset_name] = forcing_mask
+        return forcing_masks
+
+    def _apply_forcing_mask(self, y_pred: Batch, batch: Batch, **task_kwargs) -> Batch:
+        """Apply ``training.forcing_mask`` (if any) to the predictions; ``batch`` is the raw (physical) batch."""
+        # getattr: some tests build the module without running ``__init__``
+        forcing_masks = getattr(self, "forcing_masks", None)
+        if not forcing_masks:
+            return y_pred
+
+        for dataset_name, forcing_mask in forcing_masks.items():
+            if dataset_name in y_pred:
+                masked = forcing_mask.apply(
+                    y_pred[dataset_name],
+                    batch[dataset_name],
+                    pre_processors=self.model.pre_processors[dataset_name],
+                    time_indices=forcing_mask.time_indices(self.task, **task_kwargs),
+                )
+                y_pred = y_pred.replace(dataset_name, masked)
+        return y_pred
 
     def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> Batch:
         """Forward method.

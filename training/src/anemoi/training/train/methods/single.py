@@ -55,6 +55,7 @@ class SingleTraining(BaseTrainingModule):
             target_forcings = self.preprocess_inputs(target_forcings)
 
             y_pred = self(x, target_forcings=target_forcings, target_template=target_template)
+            y_pred = self._apply_forcing_mask(y_pred, batch, **task_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

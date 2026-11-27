@@ -22,6 +22,7 @@ from anemoi.utils.dates import as_timedelta
 if TYPE_CHECKING:
     from torch import nn
 
+    from anemoi.models.data import Source
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.tasks.base import BaseTask
 
@@ -172,50 +173,47 @@ class ForcingMask:
         return torch.tensor(indices, dtype=torch.long)
 
     @staticmethod
-    def _normaliser(pre_processors: nn.Module | None, n_variables: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(add, mul)`` such that ``x_normalised = x * mul + add``; identity without a normaliser."""
-        if pre_processors is not None:
-            for processor in getattr(pre_processors, "processors", {}).values():
-                if hasattr(processor, "_norm_add") and hasattr(processor, "_norm_mul"):
-                    return processor._norm_add, processor._norm_mul
-        return torch.zeros(n_variables), torch.ones(n_variables)
+    def _normaliser(pre_processors: nn.Module | None) -> object | None:
+        """The dataset's normaliser (the processor providing ``get_norm_parameters``), if any."""
+        for processor in getattr(pre_processors, "processors", {}).values():
+            if hasattr(processor, "get_norm_parameters"):
+                return processor
+        return None
 
     def apply(
         self,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
+        y_pred: Source,
+        batch: Source,
         *,
-        data_indices: IndexCollection,
         pre_processors: nn.Module | None,
         time_indices: torch.Tensor,
-    ) -> torch.Tensor:
-        """Return a copy of the normalised predictions with the masked variables overwritten.
+    ) -> Source:
+        """Return the normalised predictions with the masked variables overwritten.
 
-        ``y_pred`` is ``(batch, n_outputs, ensemble, grid, n_model_output)`` and ``batch`` is
-        ``(batch, time, ensemble, grid, n_data)``. The threshold and fill values are converted to normalised units.
+        ``batch`` is the raw (physical) data holding the forcing at every time, so the condition is tested in
+        physical units. The fill values are normalised like the predictions.
         """
-        name_to_index = data_indices.name_to_index
-        model_output = data_indices.model.output.name_to_index
+        if y_pred.is_tabular or batch.is_tabular:
+            msg = "forcing_mask is only supported for gridded datasets."
+            raise ValueError(msg)
 
-        add, mul = self._normaliser(pre_processors, len(name_to_index))
-        add, mul = add.to(device=y_pred.device, dtype=y_pred.dtype), mul.to(device=y_pred.device, dtype=y_pred.dtype)
-
-        forcing_index = name_to_index[self.mask_variable]
-        threshold = self.threshold * mul[forcing_index] + add[forcing_index]  # the normaliser is increasing
-        holds = OPERATORS[self.operator](batch[..., forcing_index], threshold)  # (batch, time, ensemble or 1, grid)
-
+        forcing = batch.values[..., batch.name_to_index[self.mask_variable]]  # (batch, time, ensemble or 1, grid)
+        holds = OPERATORS[self.operator](forcing, self.threshold)
         per_offset = holds[:, time_indices.to(holds.device)]  # (batch, n_outputs, n_offsets, ensemble or 1, grid)
         mask = per_offset.all(dim=2) if self.combine == "all" else per_offset.any(dim=2)
 
-        if mask.shape[-1] != y_pred.shape[-2]:
-            msg = f"forcing_mask: {y_pred.shape[-2]} prediction grid points but {mask.shape[-1]} in the batch."
+        if mask.shape[-1] != y_pred.grid_size:
+            msg = f"forcing_mask: {y_pred.grid_size} prediction grid points but {mask.shape[-1]} in the batch."
             raise ValueError(msg)
 
-        output_index = torch.tensor([model_output[v] for v in self.variables], device=y_pred.device)
-        data_index = [name_to_index[v] for v in self.variables]
-        fill = torch.tensor(self._fills, device=y_pred.device, dtype=y_pred.dtype) * mul[data_index] + add[data_index]
+        return y_pred.apply_func(self._overwrite, mask=mask, normaliser=self._normaliser(pre_processors))
 
-        masked = torch.where(mask.unsqueeze(-1), fill, y_pred[..., output_index])
-        y_pred = y_pred.clone()
-        y_pred[..., output_index] = masked
-        return y_pred
+    def _overwrite(self, data, *, statistics, name_to_index, mask, normaliser, **_kwargs) -> torch.Tensor:
+        """Set the masked variables to their fill value where ``mask`` holds (``data`` is a copy)."""
+        index = [name_to_index[v] for v in self.variables]
+        fill = torch.tensor(self._fills, device=data.device, dtype=data.dtype)
+        if normaliser is not None:
+            mul, add = normaliser.get_norm_parameters(statistics, name_to_index, data.device)
+            fill = fill * mul[index].to(data.dtype) + add[index].to(data.dtype)
+        data[..., index] = torch.where(mask.unsqueeze(-1), fill, data[..., index])
+        return data

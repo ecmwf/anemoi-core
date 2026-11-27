@@ -324,6 +324,7 @@ class EnsembleTraining(BaseTrainingModule):
                 target_template=self._member_template(target_template),
                 **task_step_kwargs,
             )
+            y_pred = self._apply_forcing_mask(y_pred, batch, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
