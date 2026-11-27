@@ -1277,6 +1277,9 @@ class PointWiseBackwardMapper(PointWiseMapper):
 class TransformerBaseMapper(BaseMapper, ABC):
     """Transformer Base Mapper from hidden -> data or data -> hidden."""
 
+    # Default for models pickled before neighbourhood attention, which have no split.
+    split: Optional[LayerSplit] = None
+
     def __init__(
         self,
         *,

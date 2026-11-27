@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -262,3 +263,23 @@ class TestTransformerBackwardMapper:
         out = mapper.forward(x, batch_size, shard_info, cond=cond)
 
         assert out.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
+
+
+def test_mapper_pickled_before_neighbourhood_attention_runs():
+    """A mapper pickled before rotary embeddings and neighbourhood attention runs and gives the same output."""
+    mapper = TransformerForwardMapper(**asdict(MapperConfig())).eval()
+    x = (torch.rand(10, MapperConfig().in_channels_src), torch.rand(12, MapperConfig().in_channels_dst))
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[12])
+    expected = mapper(x, 1, shard_info)[1]
+
+    for submodule in mapper.modules():
+        for name in ("rotary", "neighbourhood", "split"):
+            submodule.__dict__.pop(name, None)
+            submodule._modules.pop(name, None)
+    buffer = io.BytesIO()
+    torch.save(mapper, buffer)
+    buffer.seek(0)
+    old = torch.load(buffer, weights_only=False)
+
+    torch.testing.assert_close(old(x, 1, shard_info)[1], expected)
+    assert old.split is None
