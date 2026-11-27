@@ -1,0 +1,20 @@
+{
+ "config": {
+  "data": {"diagnostic": ["tcc", "tp"], "forcing": ["lsm", "z"], "timestep": "6h"},
+  "training": {"multistep_input": 2, "precision": "16-mixed"}
+ },
+ "data_indices": {
+  "data": {
+   "input": {"prognostic": [0, 1, 2, 3], "diagnostic": [6, 7], "forcing": [4, 5, 8, 9], "full": [0, 1, 2, 3, 4, 5, 8, 9]},
+   "output": {"full": [0, 1, 2, 3, 6, 7]}
+  },
+  "model": {
+   "input": {"forcing": [4, 5, 6, 7], "full": [0, 1, 2, 3, 4, 5, 6, 7], "prognostic": [0, 1, 2, 3]},
+   "output": {"full": [0, 1, 2, 3, 4, 5], "prognostic": [0, 1, 2, 3]}
+  }
+ },
+ "dataset": {
+  "variables": ["2t", "10u", "10v", "msl", "lsm", "z", "tcc", "tp", "cos_latitude", "insolation"],
+  "specific": {"action": "zarr", "attrs": {"data_request": {"grid": "O96"}}}
+ }
+}

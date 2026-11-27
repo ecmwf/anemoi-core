@@ -60,6 +60,7 @@ jobs:
             "torch==${{ matrix.torch-version }}" \
             -e "./training[all,tests]" \
             -e "./graphs[all,tests]" \
+            -e "./metadata[all,tests]" \
             -e "./models[all,tests]" \
             pytest pytest-md pytest-emoji
 

@@ -1,0 +1,665 @@
+{
+ "version": "3.0",
+ "config": {
+  "data": {
+   "format": "zarr",
+   "frequency": "6h",
+   "datasets": {
+    "data": {
+     "forcing": ["cos_latitude", "cos_longitude", "sin_latitude", "sin_longitude", "cos_julian_day", "cos_local_time", "sin_julian_day", "sin_local_time", "insolation", "lsm", "sdor", "slor", "z"],
+     "diagnostic": ["tp", "cp"],
+     "target": null,
+     "spatial_processor": null
+    },
+    "obs": {"forcing": ["cos_julian_day", "sin_julian_day"], "diagnostic": ["tp"], "target": null}
+   }
+  },
+  "training": {
+   "seed": null,
+   "precision": "16-mixed",
+   "method": {"_target_": "anemoi.training.train.methods.SingleTraining"},
+   "deterministic": false,
+   "ensemble_size_per_device": 1
+  },
+  "dataloader": {
+   "batch_size": {"training": 3, "validation": 3, "test": 4},
+   "training": {
+    "datasets": {
+     "data": {
+      "dataset_config": {"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h", "drop": null, "select": null, "statistics": null, "step_start": null, "step_end": null, "step_frequency": null},
+      "start": null,
+      "end": "2017-01-08 12:00:00"
+     },
+     "obs": {
+      "dataset_config": {"dataset": "example-observations", "frequency": "6h"},
+      "start": null,
+      "end": "2017-01-08 12:00:00"
+     }
+    }
+   },
+   "validation": {
+    "datasets": {
+     "data": {
+      "dataset_config": {"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h", "drop": null, "select": null, "statistics": null, "step_start": null, "step_end": null, "step_frequency": null},
+      "start": "2017-01-08 18:00:00",
+      "end": 2021
+     },
+     "obs": {
+      "dataset_config": {"dataset": "example-observations", "frequency": "6h"},
+      "start": "2017-01-08 18:00:00",
+      "end": 2021
+     }
+    }
+   },
+   "test": {
+    "datasets": {
+     "data": {
+      "dataset_config": {"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h", "drop": null, "select": null, "statistics": null, "step_start": null, "step_end": null, "step_frequency": null},
+      "start": 2022,
+      "end": null
+     },
+     "obs": {"dataset_config": {"dataset": "example-observations", "frequency": "6h"}, "start": 2022, "end": null}
+    }
+   },
+   "dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
+  },
+  "task": {
+   "_target_": "anemoi.training.tasks.Forecaster",
+   "multistep_input": 2,
+   "multistep_output": 1,
+   "timestep": "6H",
+   "rollout": {"start": 1, "epoch_increment": 0, "maximum": 1},
+   "validation_rollout": 2
+  }
+ },
+ "seed": 3460687569,
+ "base_seed": 265741890,
+ "run_id": "2a0d1895-c5f1-41e9-a715-0091f6c7c8a0",
+ "provenance_training": {
+  "time": "2026-11-26T13:43:44.825468",
+  "python": "3.12.7",
+  "module_versions": {
+   "anemoi.datasets": {"version": "0.5.50"},
+   "anemoi.models": {"version": "0.20.0.post50"},
+   "anemoi.training": {"version": "0.17.2.post50"},
+   "anemoi.utils": {"version": "0.5.14"},
+   "numpy": {"version": "2.5.5"},
+   "torch": {"version": "2.11.0"}
+  },
+  "distribution_names": {},
+  "git_versions": {
+   "anemoi.training": {"git": {"sha1": "0000000000000000000000000000000000000000", "modified_files": 0, "untracked_files": 0}}
+  }
+ },
+ "timestamp": "2026-11-26T13:43:50.243300+00:00",
+ "metadata_inference": {
+  "seed": 3460687569,
+  "base_seed": 265741890,
+  "run_id": "2a0d1895-c5f1-41e9-a715-0091f6c7c8a0",
+  "dataset_names": ["data", "obs"],
+  "data": {
+   "data_type": "gridded",
+   "grid_size": 40320,
+   "data_indices": {
+    "input": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cos_julian_day": 4, "cos_latitude": 5, "cos_local_time": 6, "cos_longitude": 7, "insolation": 8, "lsm": 9, "msl": 10, "q_100": 11, "q_1000": 12, "q_150": 13, "q_200": 14, "q_250": 15, "q_300": 16, "q_400": 17, "q_50": 18, "q_500": 19, "q_600": 20, "q_700": 21, "q_850": 22, "q_925": 23, "sdor": 24, "sin_julian_day": 25, "sin_latitude": 26, "sin_local_time": 27, "sin_longitude": 28, "skt": 29, "slor": 30, "sp": 31, "t_100": 32, "t_1000": 33, "t_150": 34, "t_200": 35, "t_250": 36, "t_300": 37, "t_400": 38, "t_50": 39, "t_500": 40, "t_600": 41, "t_700": 42, "t_850": 43, "t_925": 44, "tcw": 45, "u_100": 46, "u_1000": 47, "u_150": 48, "u_200": 49, "u_250": 50, "u_300": 51, "u_400": 52, "u_50": 53, "u_500": 54, "u_600": 55, "u_700": 56, "u_850": 57, "u_925": 58, "v_100": 59, "v_1000": 60, "v_150": 61, "v_200": 62, "v_250": 63, "v_300": 64, "v_400": 65, "v_50": 66, "v_500": 67, "v_600": 68, "v_700": 69, "v_850": 70, "v_925": 71, "w_100": 72, "w_1000": 73, "w_150": 74, "w_200": 75, "w_250": 76, "w_300": 77, "w_400": 78, "w_50": 79, "w_500": 80, "w_600": 81, "w_700": 82, "w_850": 83, "w_925": 84, "z": 85, "z_100": 86, "z_1000": 87, "z_150": 88, "z_200": 89, "z_250": 90, "z_300": 91, "z_400": 92, "z_50": 93, "z_500": 94, "z_600": 95, "z_700": 96, "z_850": 97, "z_925": 98},
+    "output": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cp": 4, "msl": 5, "q_100": 6, "q_1000": 7, "q_150": 8, "q_200": 9, "q_250": 10, "q_300": 11, "q_400": 12, "q_50": 13, "q_500": 14, "q_600": 15, "q_700": 16, "q_850": 17, "q_925": 18, "skt": 19, "sp": 20, "t_100": 21, "t_1000": 22, "t_150": 23, "t_200": 24, "t_250": 25, "t_300": 26, "t_400": 27, "t_50": 28, "t_500": 29, "t_600": 30, "t_700": 31, "t_850": 32, "t_925": 33, "tcw": 34, "tp": 35, "u_100": 36, "u_1000": 37, "u_150": 38, "u_200": 39, "u_250": 40, "u_300": 41, "u_400": 42, "u_50": 43, "u_500": 44, "u_600": 45, "u_700": 46, "u_850": 47, "u_925": 48, "v_100": 49, "v_1000": 50, "v_150": 51, "v_200": 52, "v_250": 53, "v_300": 54, "v_400": 55, "v_50": 56, "v_500": 57, "v_600": 58, "v_700": 59, "v_850": 60, "v_925": 61, "w_100": 62, "w_1000": 63, "w_150": 64, "w_200": 65, "w_250": 66, "w_300": 67, "w_400": 68, "w_50": 69, "w_500": 70, "w_600": 71, "w_700": 72, "w_850": 73, "w_925": 74, "z_100": 75, "z_1000": 76, "z_150": 77, "z_200": 78, "z_250": 79, "z_300": 80, "z_400": 81, "z_50": 82, "z_500": 83, "z_600": 84, "z_700": 85, "z_850": 86, "z_925": 87}
+   },
+   "variable_types": {
+    "forcing": ["cos_julian_day", "cos_latitude", "cos_local_time", "cos_longitude", "insolation", "lsm", "sdor", "sin_julian_day", "sin_latitude", "sin_local_time", "sin_longitude", "slor", "z"],
+    "target": [],
+    "prognostic": ["10u", "10v", "2d", "2t", "msl", "q_100", "q_1000", "q_150", "q_200", "q_250", "q_300", "q_400", "q_50", "q_500", "q_600", "q_700", "q_850", "q_925", "skt", "sp", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_850", "t_925", "tcw", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_850", "u_925", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_850", "v_925", "w_100", "w_1000", "w_150", "w_200", "w_250", "w_300", "w_400", "w_50", "w_500", "w_600", "w_700", "w_850", "w_925", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"],
+    "diagnostic": ["cp", "tp"]
+   },
+   "timesteps": {
+    "relative_date_indices_training": [0, 1, 2],
+    "input_relative_date_indices": [0, 1],
+    "output_relative_date_indices": [2],
+    "timestep": "6h"
+   }
+  },
+  "obs": {
+   "data_type": "tabular",
+   "grid_size": null,
+   "data_indices": {
+    "input": {"2t": 0, "2d": 1, "msl": 2, "cos_julian_day": 3, "sin_julian_day": 4},
+    "output": {"2t": 0, "2d": 1, "msl": 2, "tp": 3}
+   },
+   "variable_types": {
+    "forcing": ["cos_julian_day", "sin_julian_day"],
+    "target": [],
+    "prognostic": ["2t", "2d", "msl"],
+    "diagnostic": ["tp"]
+   },
+   "timesteps": {
+    "relative_date_indices_training": [0, 1, 2],
+    "input_relative_date_indices": [0, 1],
+    "output_relative_date_indices": [2],
+    "timestep": "6h"
+   }
+  },
+  "task": "forecaster"
+ },
+ "checkpoint_lineage": [],
+ "dataset": {
+  "data": {
+   "version": "0.5.50",
+   "arguments": {
+    "args": [
+     {"dataset": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr", "frequency": "6h", "start": null, "end": "2017-01-08 12:00:00"}
+    ],
+    "kwargs": {}
+   },
+   "specific": {
+    "action": "subset",
+    "shape": [30, 101, 1, 40320],
+    "frequency": "6h",
+    "start_date": "2017-01-01T06:00:00",
+    "end_date": "2017-01-10T18:00:00",
+    "forward": {
+     "action": "griddedzarr",
+     "shape": [39, 101, 1, 40320],
+     "frequency": "6h",
+     "start_date": "2017-01-01T06:00:00",
+     "end_date": "2017-01-10T18:00:00",
+     "attrs": {
+      "allow_nans": false,
+      "constant_fields": ["cos_latitude", "cos_longitude", "lsm", "sdor", "sin_latitude", "sin_longitude", "slor", "z"],
+      "data_request": {
+       "area": [89.285, 0.0, -89.285, 359.1],
+       "grid": "O96",
+       "param_level": {
+        "pl": [
+         ["q", 50],
+         ["q", 100],
+         ["q", 150],
+         ["q", 200],
+         ["q", 250],
+         ["q", 300],
+         ["q", 400],
+         ["q", 500],
+         ["q", 600],
+         ["q", 700],
+         ["q", 850],
+         ["q", 925],
+         ["q", 1000],
+         ["t", 50],
+         ["t", 100],
+         ["t", 150],
+         ["t", 200],
+         ["t", 250],
+         ["t", 300],
+         ["t", 400],
+         ["t", 500],
+         ["t", 600],
+         ["t", 700],
+         ["t", 850],
+         ["t", 925],
+         ["t", 1000],
+         ["u", 50],
+         ["u", 100],
+         ["u", 150],
+         ["u", 200],
+         ["u", 250],
+         ["u", 300],
+         ["u", 400],
+         ["u", 500],
+         ["u", 600],
+         ["u", 700],
+         ["u", 850],
+         ["u", 925],
+         ["u", 1000],
+         ["v", 50],
+         ["v", 100],
+         ["v", 150],
+         ["v", 200],
+         ["v", 250],
+         ["v", 300],
+         ["v", 400],
+         ["v", 500],
+         ["v", 600],
+         ["v", 700],
+         ["v", 850],
+         ["v", 925],
+         ["v", 1000],
+         ["w", 50],
+         ["w", 100],
+         ["w", 150],
+         ["w", 200],
+         ["w", 250],
+         ["w", 300],
+         ["w", 400],
+         ["w", 500],
+         ["w", 600],
+         ["w", 700],
+         ["w", 850],
+         ["w", 925],
+         ["w", 1000],
+         ["z", 50],
+         ["z", 100],
+         ["z", 150],
+         ["z", 200],
+         ["z", 250],
+         ["z", 300],
+         ["z", 400],
+         ["z", 500],
+         ["z", 600],
+         ["z", 700],
+         ["z", 850],
+         ["z", 925],
+         ["z", 1000]
+        ],
+        "sfc": ["10u", "10v", "2d", "2t", "cp", "lsm", "msl", "sdor", "skt", "slor", "sp", "tcw", "tp", "z"]
+       },
+       "param_step": {"sfc": [["cp", 12], ["tp", 12]]}
+      },
+      "end_date": "2017-01-10T18:00:00",
+      "ensemble_dimension": 1,
+      "field_shape": [40320],
+      "flatten_grid": true,
+      "frequency": "6h",
+      "resolution": "O96",
+      "start_date": "2017-01-01T06:00:00",
+      "version": "0.30"
+     },
+     "dtype": "float32",
+     "path": ".../aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
+    },
+    "reason": {"frequency": "6h", "end": "2017-01-08 12:00:00"}
+   },
+   "frequency": "6h",
+   "variables": ["10u", "10v", "2d", "2t", "cos_julian_day", "cos_latitude", "cos_local_time", "cos_longitude", "cp", "insolation", "lsm", "msl", "q_100", "q_1000", "q_150", "q_200", "q_250", "q_300", "q_400", "q_50", "q_500", "q_600", "q_700", "q_850", "q_925", "sdor", "sin_julian_day", "sin_latitude", "sin_local_time", "sin_longitude", "skt", "slor", "sp", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_850", "t_925", "tcw", "tp", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_850", "u_925", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_850", "v_925", "w_100", "w_1000", "w_150", "w_200", "w_250", "w_300", "w_400", "w_50", "w_500", "w_600", "w_700", "w_850", "w_925", "z", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"],
+   "variables_metadata": {
+    "10u": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "10u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "10v": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "10v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "2d": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "2d", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "2t": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "2t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "cos_julian_day": {"computed_forcing": true, "constant_in_time": false},
+    "cos_latitude": {"computed_forcing": true, "constant_in_time": true},
+    "cos_local_time": {"computed_forcing": true, "constant_in_time": false},
+    "cos_longitude": {"computed_forcing": true, "constant_in_time": true},
+    "cp": {
+     "mars": {"class": "ea", "date": 20161231, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "cp", "step": 12, "stream": "oper", "time": 1800, "type": "fc"},
+     "period": ["6h", "12h"],
+     "process": "accumulation"
+    },
+    "insolation": {"computed_forcing": true, "constant_in_time": false},
+    "lsm": {
+     "constant_in_time": true,
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "lsm", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "msl": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "msl", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "q_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "q", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "sdor": {
+     "constant_in_time": true,
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "sdor", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "sin_julian_day": {"computed_forcing": true, "constant_in_time": false},
+    "sin_latitude": {"computed_forcing": true, "constant_in_time": true},
+    "sin_local_time": {"computed_forcing": true, "constant_in_time": false},
+    "sin_longitude": {"computed_forcing": true, "constant_in_time": true},
+    "skt": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "skt", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "slor": {
+     "constant_in_time": true,
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "slor", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "sp": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "sp", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "t_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "t", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "tcw": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "tcw", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "tp": {
+     "mars": {"class": "ea", "date": 20161231, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "tp", "step": 12, "stream": "oper", "time": 1800, "type": "fc"},
+     "period": ["6h", "12h"],
+     "process": "accumulation"
+    },
+    "u_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "u_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "u", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "v_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "v", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "w_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "w", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z": {
+     "constant_in_time": true,
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levtype": "sfc", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_100": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 100, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_1000": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 1000, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_150": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 150, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_200": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 200, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_250": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 250, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_300": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 300, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_400": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 400, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_50": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 50, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_500": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 500, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_600": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 600, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_700": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 700, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_850": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 850, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    },
+    "z_925": {
+     "mars": {"class": "ea", "date": 20170101, "domain": "g", "expver": "0001", "levelist": 925, "levtype": "pl", "param": "z", "step": 0, "stream": "oper", "time": 600, "type": "an"}
+    }
+   },
+   "shape": [30, 101, 1, 40320],
+   "dtype": "float32",
+   "start_date": "2017-01-01T06:00:00",
+   "end_date": "2017-01-10T18:00:00",
+   "name": null,
+   "sources": [],
+   "supporting_arrays": ["latitudes", "longitudes"]
+  },
+  "obs": {}
+ },
+ "data_indices": {
+  "data": {
+   "data": {
+    "input": {
+     "prognostic": [0, 1, 2, 3, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100],
+     "diagnostic": [8, 47],
+     "forcing": [4, 5, 6, 7, 9, 10, 25, 26, 27, 28, 29, 31, 87],
+     "target": [],
+     "full": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100],
+     "name_to_index": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cos_julian_day": 4, "cos_latitude": 5, "cos_local_time": 6, "cos_longitude": 7, "cp": 8, "insolation": 9, "lsm": 10, "msl": 11, "q_100": 12, "q_1000": 13, "q_150": 14, "q_200": 15, "q_250": 16, "q_300": 17, "q_400": 18, "q_50": 19, "q_500": 20, "q_600": 21, "q_700": 22, "q_850": 23, "q_925": 24, "sdor": 25, "sin_julian_day": 26, "sin_latitude": 27, "sin_local_time": 28, "sin_longitude": 29, "skt": 30, "slor": 31, "sp": 32, "t_100": 33, "t_1000": 34, "t_150": 35, "t_200": 36, "t_250": 37, "t_300": 38, "t_400": 39, "t_50": 40, "t_500": 41, "t_600": 42, "t_700": 43, "t_850": 44, "t_925": 45, "tcw": 46, "tp": 47, "u_100": 48, "u_1000": 49, "u_150": 50, "u_200": 51, "u_250": 52, "u_300": 53, "u_400": 54, "u_50": 55, "u_500": 56, "u_600": 57, "u_700": 58, "u_850": 59, "u_925": 60, "v_100": 61, "v_1000": 62, "v_150": 63, "v_200": 64, "v_250": 65, "v_300": 66, "v_400": 67, "v_50": 68, "v_500": 69, "v_600": 70, "v_700": 71, "v_850": 72, "v_925": 73, "w_100": 74, "w_1000": 75, "w_150": 76, "w_200": 77, "w_250": 78, "w_300": 79, "w_400": 80, "w_50": 81, "w_500": 82, "w_600": 83, "w_700": 84, "w_850": 85, "w_925": 86, "z": 87, "z_100": 88, "z_1000": 89, "z_150": 90, "z_200": 91, "z_250": 92, "z_300": 93, "z_400": 94, "z_50": 95, "z_500": 96, "z_600": 97, "z_700": 98, "z_850": 99, "z_925": 100}
+    },
+    "output": {
+     "prognostic": [0, 1, 2, 3, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100],
+     "diagnostic": [8, 47],
+     "forcing": [4, 5, 6, 7, 9, 10, 25, 26, 27, 28, 29, 31, 87],
+     "target": [],
+     "full": [0, 1, 2, 3, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100],
+     "name_to_index": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cos_julian_day": 4, "cos_latitude": 5, "cos_local_time": 6, "cos_longitude": 7, "cp": 8, "insolation": 9, "lsm": 10, "msl": 11, "q_100": 12, "q_1000": 13, "q_150": 14, "q_200": 15, "q_250": 16, "q_300": 17, "q_400": 18, "q_50": 19, "q_500": 20, "q_600": 21, "q_700": 22, "q_850": 23, "q_925": 24, "sdor": 25, "sin_julian_day": 26, "sin_latitude": 27, "sin_local_time": 28, "sin_longitude": 29, "skt": 30, "slor": 31, "sp": 32, "t_100": 33, "t_1000": 34, "t_150": 35, "t_200": 36, "t_250": 37, "t_300": 38, "t_400": 39, "t_50": 40, "t_500": 41, "t_600": 42, "t_700": 43, "t_850": 44, "t_925": 45, "tcw": 46, "tp": 47, "u_100": 48, "u_1000": 49, "u_150": 50, "u_200": 51, "u_250": 52, "u_300": 53, "u_400": 54, "u_50": 55, "u_500": 56, "u_600": 57, "u_700": 58, "u_850": 59, "u_925": 60, "v_100": 61, "v_1000": 62, "v_150": 63, "v_200": 64, "v_250": 65, "v_300": 66, "v_400": 67, "v_50": 68, "v_500": 69, "v_600": 70, "v_700": 71, "v_850": 72, "v_925": 73, "w_100": 74, "w_1000": 75, "w_150": 76, "w_200": 77, "w_250": 78, "w_300": 79, "w_400": 80, "w_50": 81, "w_500": 82, "w_600": 83, "w_700": 84, "w_850": 85, "w_925": 86, "z": 87, "z_100": 88, "z_1000": 89, "z_150": 90, "z_200": 91, "z_250": 92, "z_300": 93, "z_400": 94, "z_50": 95, "z_500": 96, "z_600": 97, "z_700": 98, "z_850": 99, "z_925": 100}
+    }
+   },
+   "model": {
+    "input": {
+     "prognostic": [0, 1, 2, 3, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 29, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98],
+     "diagnostic": [],
+     "forcing": [4, 5, 6, 7, 8, 9, 24, 25, 26, 27, 28, 30, 85],
+     "target": [],
+     "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98],
+     "name_to_index": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cos_julian_day": 4, "cos_latitude": 5, "cos_local_time": 6, "cos_longitude": 7, "insolation": 8, "lsm": 9, "msl": 10, "q_100": 11, "q_1000": 12, "q_150": 13, "q_200": 14, "q_250": 15, "q_300": 16, "q_400": 17, "q_50": 18, "q_500": 19, "q_600": 20, "q_700": 21, "q_850": 22, "q_925": 23, "sdor": 24, "sin_julian_day": 25, "sin_latitude": 26, "sin_local_time": 27, "sin_longitude": 28, "skt": 29, "slor": 30, "sp": 31, "t_100": 32, "t_1000": 33, "t_150": 34, "t_200": 35, "t_250": 36, "t_300": 37, "t_400": 38, "t_50": 39, "t_500": 40, "t_600": 41, "t_700": 42, "t_850": 43, "t_925": 44, "tcw": 45, "u_100": 46, "u_1000": 47, "u_150": 48, "u_200": 49, "u_250": 50, "u_300": 51, "u_400": 52, "u_50": 53, "u_500": 54, "u_600": 55, "u_700": 56, "u_850": 57, "u_925": 58, "v_100": 59, "v_1000": 60, "v_150": 61, "v_200": 62, "v_250": 63, "v_300": 64, "v_400": 65, "v_50": 66, "v_500": 67, "v_600": 68, "v_700": 69, "v_850": 70, "v_925": 71, "w_100": 72, "w_1000": 73, "w_150": 74, "w_200": 75, "w_250": 76, "w_300": 77, "w_400": 78, "w_50": 79, "w_500": 80, "w_600": 81, "w_700": 82, "w_850": 83, "w_925": 84, "z": 85, "z_100": 86, "z_1000": 87, "z_150": 88, "z_200": 89, "z_250": 90, "z_300": 91, "z_400": 92, "z_50": 93, "z_500": 94, "z_600": 95, "z_700": 96, "z_850": 97, "z_925": 98}
+    },
+    "output": {
+     "prognostic": [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87],
+     "diagnostic": [4, 35],
+     "forcing": [],
+     "target": [],
+     "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87],
+     "name_to_index": {"10u": 0, "10v": 1, "2d": 2, "2t": 3, "cp": 4, "msl": 5, "q_100": 6, "q_1000": 7, "q_150": 8, "q_200": 9, "q_250": 10, "q_300": 11, "q_400": 12, "q_50": 13, "q_500": 14, "q_600": 15, "q_700": 16, "q_850": 17, "q_925": 18, "skt": 19, "sp": 20, "t_100": 21, "t_1000": 22, "t_150": 23, "t_200": 24, "t_250": 25, "t_300": 26, "t_400": 27, "t_50": 28, "t_500": 29, "t_600": 30, "t_700": 31, "t_850": 32, "t_925": 33, "tcw": 34, "tp": 35, "u_100": 36, "u_1000": 37, "u_150": 38, "u_200": 39, "u_250": 40, "u_300": 41, "u_400": 42, "u_50": 43, "u_500": 44, "u_600": 45, "u_700": 46, "u_850": 47, "u_925": 48, "v_100": 49, "v_1000": 50, "v_150": 51, "v_200": 52, "v_250": 53, "v_300": 54, "v_400": 55, "v_50": 56, "v_500": 57, "v_600": 58, "v_700": 59, "v_850": 60, "v_925": 61, "w_100": 62, "w_1000": 63, "w_150": 64, "w_200": 65, "w_250": 66, "w_300": 67, "w_400": 68, "w_50": 69, "w_500": 70, "w_600": 71, "w_700": 72, "w_850": 73, "w_925": 74, "z_100": 75, "z_1000": 76, "z_150": 77, "z_200": 78, "z_250": 79, "z_300": 80, "z_400": 81, "z_50": 82, "z_500": 83, "z_600": 84, "z_700": 85, "z_850": 86, "z_925": 87}
+    }
+   }
+  },
+  "obs": {
+   "data": {
+    "input": {
+     "prognostic": [0, 1, 2],
+     "diagnostic": [5],
+     "forcing": [3, 4],
+     "target": [],
+     "full": [0, 1, 2, 3, 4],
+     "name_to_index": {"2t": 0, "2d": 1, "msl": 2, "cos_julian_day": 3, "sin_julian_day": 4, "tp": 5}
+    },
+    "output": {
+     "prognostic": [0, 1, 2],
+     "diagnostic": [5],
+     "forcing": [3, 4],
+     "target": [],
+     "full": [0, 1, 2, 5],
+     "name_to_index": {"2t": 0, "2d": 1, "msl": 2, "cos_julian_day": 3, "sin_julian_day": 4, "tp": 5}
+    }
+   },
+   "model": {
+    "input": {
+     "prognostic": [0, 1, 2],
+     "diagnostic": [],
+     "forcing": [3, 4],
+     "target": [],
+     "full": [0, 1, 2, 3, 4],
+     "name_to_index": {"2t": 0, "2d": 1, "msl": 2, "cos_julian_day": 3, "sin_julian_day": 4}
+    },
+    "output": {
+     "prognostic": [0, 1, 2],
+     "diagnostic": [3],
+     "forcing": [],
+     "target": [],
+     "full": [0, 1, 2, 3],
+     "name_to_index": {"2t": 0, "2d": 1, "msl": 2, "tp": 3}
+    }
+   }
+  }
+ },
+ "uuid": "0338a6fb-ba8e-4236-af31-311fe14922c8",
+ "model": {"model": "AnemoiModelInterface", "trainable_parameters": 2549672, "total_parameters": 2549672, "summary": "(torchinfo summary removed)"},
+ "tracker": {"null": null},
+ "training": {"current_epoch": 1, "global_step": 6, "elapsed_time": 113.38574123382568},
+ "supporting_arrays_paths": {
+  "data": {
+   "latitudes": {"path": "inference-last/anemoi-metadata/data/latitudes.numpy", "shape": [40320], "dtype": "float64"},
+   "longitudes": {"path": "inference-last/anemoi-metadata/data/longitudes.numpy", "shape": [40320], "dtype": "float64"}
+  },
+  "obs": {}
+ }
+}
