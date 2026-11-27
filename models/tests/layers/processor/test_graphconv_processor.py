@@ -63,7 +63,7 @@ class TestGNNProcessor:
     def graph_provider(self, fake_graph, device):
         provider = create_graph_provider(
             graph=fake_graph[("nodes", "to", "nodes")],
-            edge_attributes=["edge_attr1", "edge_attr2"],
+            edge_attribute_names=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_NODES,
             dst_size=self.NUM_NODES,
             trainable_size=8,
@@ -117,9 +117,9 @@ class TestGNNProcessor:
         # Check gradients of processor
         for param in graphconv_processor.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_unsorted_edge_flag_reaches_sharding(
         self, graphconv_processor, graphconv_init, graph_provider, monkeypatch

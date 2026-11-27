@@ -60,10 +60,9 @@ class BaseResidualConnection(nn.Module, ABC):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    This layer returns the input step selected by 'step'.
+    This layer returns the input step selected by `step` (by default the last one),
+    bypassing the processing layers.
 
-    The default is to return the last input step.
-    This module is used to bypass processing layers and directly pass the latest input forward.
     Parameters
     ----------
     step : int, default -1
@@ -263,15 +262,15 @@ class TruncatedConnection(BaseResidualConnection):
         """Validate and return the (up, down) edge tuples."""
         files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
         if files_specified:
-            assert (
-                truncation_up_edges_name is None and truncation_down_edges_name is None
-            ), "Specify either file paths or edge names for truncation, not both."
+            assert truncation_up_edges_name is None and truncation_down_edges_name is None, (
+                "Specify either file paths or edge names for truncation, not both."
+            )
             return None, None
 
         assert graph is not None, "graph must be provided when file paths are not specified."
-        assert (
-            truncation_up_edges_name is not None and truncation_down_edges_name is not None
-        ), "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
+        assert truncation_up_edges_name is not None and truncation_down_edges_name is not None, (
+            "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
+        )
         up_edges = tuple(truncation_up_edges_name)
         down_edges = tuple(truncation_down_edges_name)
         assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."

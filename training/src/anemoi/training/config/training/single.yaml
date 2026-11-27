@@ -14,10 +14,6 @@ defaults:
 # continues from, or draws a new one for a new run
 seed: null
 
-update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
-
 # Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
 # dataset (fine-tuning / transfer learning / resuming). Set ignore_units/ignore_processing_period to True
 # to skip those checks globally, or to a list of variable names to skip only those variables.
@@ -63,9 +59,11 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
-  # must be False when accum_grad_batches > 1
-  static_graph: True
-  find_unused_parameters: False
+  # False with find_unused_parameters: True makes resumed runs bitwise reproducible.
+  # static_graph: True with find_unused_parameters: False can be faster for large models,
+  # but static_graph must be False when accum_grad_batches > 1
+  static_graph: False
+  find_unused_parameters: True
 
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2

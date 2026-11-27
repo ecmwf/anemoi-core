@@ -276,7 +276,6 @@ def _convert_npint_to_int(obj: Any) -> dict | list | int | str | float:
 
 
 class PatchedProfile(profile):
-
     def _get_distributed_info(self) -> dict[str, str]:
         dist_info = super()._get_distributed_info()
         return _convert_npint_to_int(dist_info)
@@ -295,9 +294,9 @@ class BenchmarkProfiler(Profiler):
         self.num_steps = self.config.diagnostics.benchmark_profiler.memory.steps
 
         if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
-            assert (
-                self.num_steps <= self.config.training.num_sanity_val_steps
-            ), "Sanity steps should be less than snapshot steps, to avoid memory issues"
+            assert self.num_steps <= self.config.training.num_sanity_val_steps, (
+                "Sanity steps should be less than snapshot steps, to avoid memory issues"
+            )
 
         self.dirpath = None
         self.create_output_path()
@@ -358,9 +357,9 @@ class BenchmarkProfiler(Profiler):
             if not (self.config.diagnostics.benchmark_profiler.memory.trace_rank0_only and global_rank != 0):
                 from pytorch_lightning.profilers.pytorch import _KINETO_AVAILABLE
 
-                assert (
-                    _KINETO_AVAILABLE
-                ), "Kineto is not available. Please ensure Kineto is avaialble to be able to use the memory profiler"
+                assert _KINETO_AVAILABLE, (
+                    "Kineto is not available. Please ensure Kineto is avaialble to be able to use the memory profiler"
+                )
 
                 torch.profiler.profile = (
                     PatchedProfile  # patch the profile(KinetoProfile) object to serialise the distributed info
@@ -499,25 +498,20 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: BaseTrainingModule, example_input_array: dict[str, np.ndarray]) -> str:
+    def get_model_summary(self, model: BaseTrainingModule) -> str:
+        """Summarise the model's layers and parameter counts.
 
+        The model layers the new objects, which torchinfo
+        cannot size, so input/output sizes and mult-adds are not reported.
+        """
         from torchinfo import summary
-
-        # when using flash attention model, we need to convert the input and model to float16 and cuda
-        # since FlashAttention only supports fp16 and bf16 data type
-        for dataset_name in example_input_array:
-            example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
-            example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
-        model.half()
-        model = model.to("cuda")
 
         summary_str = str(
             summary(
                 model,
-                input_data=example_input_array,
                 depth=20,
                 col_width=16,
-                col_names=["trainable", "input_size", "output_size", "num_params", "params_percent", "mult_adds"],
+                col_names=["trainable", "num_params", "params_percent"],
                 row_settings=["var_names"],
                 verbose=0,
             ),

@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.checkpoint.lineage import record_checkpoint_lineage
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -82,7 +84,7 @@ def run_checkpoint_pipeline(
     model : nn.Module
         The model to load into.
     config : DictConfig
-        The training config.
+        The training config. A plain dict is accepted.
     parent_run_server2server : str, optional
         Resume lineage ID from the logger.
     fork_run_server2server : str, optional
@@ -113,6 +115,9 @@ def run_checkpoint_pipeline(
     from anemoi.training.checkpoint.builder import build_resume_source
     from anemoi.training.checkpoint.builder import resumes_via_lightning
 
+    if not OmegaConf.is_config(config):
+        config = OmegaConf.create(config)
+
     build_kwargs = {
         "parent_run_server2server": parent_run_server2server,
         "fork_run_server2server": fork_run_server2server,
@@ -127,6 +132,14 @@ def run_checkpoint_pipeline(
         _resolve_resume_checkpoint(resume_source, context)
 
     context = pipeline.execute(context)
+
+    # Write one ckpt lineage hop on the training module, but, only
+    # when the pipeline itself loaded the ckpt (in this case, loading_strategy is set).
+    # Use loading_strategy to record the hop here, else, ParentUUIDCallback
+    # records the hop when Lightning opens the file.
+    strategy = context.metadata.get("loading_strategy")
+    if strategy and context.checkpoint_data is not None and hasattr(context.model, "hparams"):
+        record_checkpoint_lineage(context.model, context.checkpoint_data, strategy)
 
     # One owner per load, decided from the config: Lightning on a resume, the
     # pipeline's loading stage otherwise. A pipeline load keeps ckpt_path from

@@ -23,7 +23,6 @@ from anemoi.training.train.train import AnemoiTrainer
 
 
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -258,7 +257,6 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     module.config = types.SimpleNamespace(
         training=types.SimpleNamespace(
             load_weights_only=False,
-            update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
         ),
     )
 

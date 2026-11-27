@@ -38,7 +38,6 @@ class TestMultiScaleEdgesInit:
 
 
 class TestHEALPixMultiScaleEdgesTransform:
-
     @pytest.fixture()
     def healpix_graph(self) -> HeteroData:
         """Return a HeteroData object with HEALPixMultiScaleEdges."""

@@ -92,7 +92,7 @@ class MultiHeadSelfAttention(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -191,8 +191,10 @@ class MultiHeadSelfAttention(nn.Module):
             )
             self.attention_implementation = ATTENTION_BACKEND
 
-        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
+        assert self.attention_implementation in attn_funcs, (
+            f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
+        )
 
         # initalise the attn func here
         if self.attention_implementation == "flash_attention":
@@ -219,9 +221,9 @@ class MultiHeadSelfAttention(nn.Module):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded accross GPUs"
+            )
 
         query, key, value = (
             einops.rearrange(
@@ -368,6 +370,11 @@ class SDPAAttentionWrapper(AttentionWrapper):
                 1, query.shape[1], query.shape[2], key.shape[2], window_size, device=query.device
             )
 
+        # A length-1 head axis can carry any stride; after the heads are shared out across ranks it carries
+        # stride 1, which the memory-efficient kernel rejects at launch ("cutlassF: no kernel found to launch").
+        # Squeezing it out and adding it back gives it the usual stride, without copying.
+        query, key, value = (t.squeeze(1).unsqueeze(1) if t.shape[1] == 1 else t for t in (query, key, value))
+
         out = self.attention(
             query,
             key,
@@ -483,7 +490,7 @@ class FlashAttentionWrapper(AttentionWrapper):
         causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (

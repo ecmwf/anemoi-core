@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .builders.delaunay import SphericalDelaunayEdges
+from .attributes import Timedeltas
 from .builders.euclidean.cutoff import CutOffEdges
 from .builders.euclidean.cutoff import ReversedCutOffEdges
 from .builders.euclidean.knn import KNNEdges
@@ -31,4 +32,5 @@ __all__ = [
     "ICONTopologicalProcessorEdges",
     "ICONTopologicalEncoderEdges",
     "ICONTopologicalDecoderEdges",
+    "Timedeltas",
 ]
