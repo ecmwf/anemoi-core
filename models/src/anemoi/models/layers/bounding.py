@@ -170,6 +170,44 @@ class NormalizedLeakyReluBounding(NormalizedReluBounding):
         return data
 
 
+class ForcingMaskBounding(NormalizedReluBounding):
+    """Set variables to ``fill_value`` where ``mask(target_forcings)`` is true.
+
+    ``mask`` is a callable returning a boolean ``(batch, time, ensemble, grid)`` tensor from the output-time
+    forcings, see :mod:`anemoi.models.layers.forcing_functions`. For example, to zero accumulated radiation where
+    the sun was down for the whole accumulation period::
+
+        _target_: anemoi.models.layers.bounding.ForcingMaskBounding
+        variables: [ssr, ssrd, fdir]
+        normalizer: [mean-std, mean-std, mean-std]  # normalises the fill value, as in NormalizedReluBounding
+        mask:
+          _target_: anemoi.models.layers.forcing_functions.NoSunlightInWindow
+          window: 6h
+    """
+
+    #: The model passes the output-time forcings of the dataset to ``forward``.
+    uses_target_forcings = True
+
+    def __init__(
+        self, *, variables: list[str], normalizer: list[str], mask: Any, fill_value: float = 0.0, **kwargs
+    ) -> None:
+        super().__init__(variables=variables, min_val=[float(fill_value)] * len(variables), normalizer=normalizer)
+        self.mask = mask
+
+    def forward(self, x: "Source", target_forcings: "Source | None" = None) -> "Source":
+        if target_forcings is None:
+            raise ValueError(f"{self.__class__.__name__} needs the output-time forcings (target_forcings).")
+        indices = self._get_indices(x.name_to_index).to(x.device)
+        fill = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.device)
+        return x.apply_func(self.bound, indices=indices, norm_min_val=fill, condition=self.mask(target_forcings))
+
+    def bound(
+        self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, condition: torch.Tensor, **_kwargs
+    ) -> torch.Tensor:
+        data[..., indices] = torch.where(condition.unsqueeze(-1), norm_min_val.to(data.dtype), data[..., indices])
+        return data
+
+
 class HardtanhBounding(BaseBounding):
     """Bounding with specified minimum and maximum values.
 
@@ -245,6 +283,21 @@ class LeakyFractionBounding(FractionBounding):
         data[..., indices] = leaky_hardtanh(data[..., indices], min_val=self.min_val, max_val=self.max_val)
         data[..., indices] *= data[..., total_index]
         return data
+
+
+def apply_boundings(boundings: nn.Module, x: "Source", target_forcings: "Source | None" = None) -> "Source":
+    """Apply the boundings of a dataset to its predictions, in order.
+
+    ``boundings`` is the module built by :func:`build_boundings` (a ``nn.Sequential``), but a single module or a
+    ``nn.ModuleList`` is accepted too. Boundings with ``uses_target_forcings`` also receive the output-time forcings.
+    """
+    modules = boundings if isinstance(boundings, (nn.Sequential, nn.ModuleList)) else [boundings]
+    for bounding in modules:
+        if getattr(bounding, "uses_target_forcings", False):
+            x = bounding(x, target_forcings=target_forcings)
+        else:
+            x = bounding(x)
+    return x
 
 
 def _build_dataset_boundings(

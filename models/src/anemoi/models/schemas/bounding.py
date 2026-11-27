@@ -90,6 +90,22 @@ class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
     "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
 
 
+class ForcingMaskBoundingSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.bounding.ForcingMaskBounding"] = Field(..., alias="_target_")
+    variables: list[str]
+    normalizer: list[str]
+    "Normalisation method of each variable, to normalise the fill value."
+    mask: dict
+    "Config (with a _target_) of a callable returning a boolean mask from the target forcings."
+    fill_value: float = 0.0
+    "Fill value in physical units."
+
+    @model_validator(mode="after")
+    def check_normalizers_match_variables(self) -> ForcingMaskBoundingSchema:
+        assert len(self.normalizer) == len(self.variables), f"{self.__class__} needs one normalizer per variable."
+        return self
+
+
 BoundingSchema = Annotated[
     Union[
         ReluBoundingSchema,
@@ -100,6 +116,7 @@ BoundingSchema = Annotated[
         LeakyHardtanhBoundingSchema,
         NormalizedReluBoundingSchema,
         NormalizedLeakyReluBoundingSchema,
+        ForcingMaskBoundingSchema,
     ],
     Field(discriminator="target_"),
 ]

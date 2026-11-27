@@ -31,6 +31,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
+from anemoi.models.layers.bounding import apply_boundings
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.node_embedder import NOOP_NODE_EMBEDDER_TARGET
 from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
@@ -568,6 +569,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         template: "BaseTemplate",
         dtype: torch.dtype,
         dataset_name: str,
+        target_forcings: "Source | None" = None,
     ) -> "Source":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
@@ -575,9 +577,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # The decoder output becomes a source shaped and named like the template.
         pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
         pred = self._add_residual(pred, x_skip, dataset_name)
-        pred = self.boundings[dataset_name](pred)
-
-        return pred
+        # boundings that depend on forcings (e.g. ForcingMaskBounding) receive the output-time forcings
+        return apply_boundings(self.boundings[dataset_name], pred, target_forcings)
 
     def _add_residual(self, pred: "Source", x_skip: torch.Tensor | None, dataset_name: str) -> "Source":
         """Add the residual connection to the prognostic variables of ``pred``; the diagnostics stay as they are."""
@@ -995,6 +996,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
+                target_forcings=target_forcings.get(dataset_name, None) if target_forcings is not None else None,
             )
 
         return Batch(x_out_dict)
