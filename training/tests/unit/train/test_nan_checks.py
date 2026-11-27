@@ -20,6 +20,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.transport import TransportTraining
@@ -60,6 +61,45 @@ def _targets_with_nans() -> object:
 
 def _check(loss: torch.nn.Module) -> None:
     BaseTrainingModule._check_nan_targets(_module(), _targets_with_nans(), "data", {"training_loss": loss})
+
+
+def _filtered_loss(variable: str, *, ignore_nans: bool = False) -> torch.nn.Module:
+    return get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.MSELoss",
+                "predicted_variables": [variable],
+                "target_variables": [variable],
+                "ignore_nans": ignore_nans,
+                "scalers": [],
+            }
+        ),
+        data_indices=_module().data_indices["data"],
+    )
+
+
+def test_filtered_loss_does_not_check_excluded_targets() -> None:
+    _check(_filtered_loss("a"))
+
+
+def test_filtered_loss_rejects_nan_in_selected_target() -> None:
+    with pytest.raises(ValueError, match=r"targets of \['b'\] contain NaNs"):
+        _check(_filtered_loss("b"))
+
+
+@pytest.mark.parametrize("ignore_nans", [True, False])
+def test_combined_loss_uses_each_childs_target_selection(ignore_nans: bool) -> None:
+    loss = CombinedLoss(
+        losses=[
+            _filtered_loss("a"),
+            TimeAggregateLossWrapper(["mean"], _filtered_loss("b", ignore_nans=ignore_nans)),
+        ]
+    )
+    if ignore_nans:
+        _check(loss)
+    else:
+        with pytest.raises(ValueError, match=r"targets of \['b'\] contain NaNs"):
+            _check(loss)
 
 
 def _combined(*ignore_nans: bool) -> CombinedLoss:

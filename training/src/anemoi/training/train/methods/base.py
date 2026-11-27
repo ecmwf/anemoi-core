@@ -34,10 +34,13 @@ from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import BaseLossWrapper
+from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -99,6 +102,22 @@ def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
         # merged into a multi-dataset config); no loss is built for those, so skip them.
         if dataset_config is not None and dataset_name in output_mask:
             resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
+
+
+def _nan_sensitive_target_names(loss: torch.nn.Module, default_names: set[str]) -> set[str]:
+    """Find which target variables reach losses that cannot handle NaNs."""
+    if isinstance(loss, LossVariableMapper) and loss.target_variables is not None:
+        return _nan_sensitive_target_names(loss.loss, set(loss.target_variables))
+    if isinstance(loss, CombinedLoss):
+        names = set()
+        for child in loss.losses:
+            names.update(_nan_sensitive_target_names(child, default_names))
+        return names
+    if isinstance(loss, BaseLossWrapper):
+        return _nan_sensitive_target_names(loss.loss, default_names)
+
+    leaves = loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else loss.modules()
+    return default_names if any(getattr(leaf, "ignore_nans", True) is False for leaf in leaves) else set()
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -833,7 +852,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Targets are not imputed, so missing values reach the losses as NaNs. A loss or metric
         with ``ignore_nans=False`` would then return NaN. The check only runs when such a loss is
-        configured for ``dataset_name``, and only looks at the model's output variables.
+        configured for ``dataset_name``. For filtered losses it checks their selected targets;
+        otherwise it checks the model's output variables.
 
         Parameters
         ----------
@@ -844,24 +864,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         losses : dict[str, torch.nn.Module]
             Losses or metrics to check, keyed by the name used in the error message.
         """
-        # Only the leaf losses compute anything: a container such as CombinedLoss keeps its own
-        # (unused) ignore_nans=False even when all of its children ignore NaNs.
-        intolerant = [
-            name
-            for name, loss in losses.items()
-            if any(
-                getattr(leaf, "ignore_nans", True) is False
-                for leaf in (loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else loss.modules())
-            )
-        ]
-        if not intolerant:
+        output_names = set(self.data_indices[dataset_name].model.output.name_to_index)
+        names_by_loss = {name: _nan_sensitive_target_names(loss, output_names) for name, loss in losses.items()}
+        checked_names = set().union(*names_by_loss.values())
+        if not checked_names:
             return
 
-        flags = self._nan_flags_per_variable(y, self.data_indices[dataset_name].model.output.name_to_index)
+        flags = self._nan_flags_per_variable(y, dict.fromkeys(checked_names))
         if flags is None or not bool(flags[1].any()):
             return
 
         nan_variables = self._variables_with_nans(y, *flags)
+        intolerant = [name for name, names in names_by_loss.items() if names.intersection(nan_variables)]
         msg = (
             f"Dataset '{dataset_name}': the targets of {nan_variables} contain NaNs, but {intolerant} "
             "use ignore_nans=False, so they would be NaN. Targets are not imputed; set ignore_nans: True "
