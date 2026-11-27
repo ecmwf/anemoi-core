@@ -105,7 +105,10 @@ class StatePredictionMode(PredictionMode):
 
 
 class TendencyPredictionMode(PredictionMode):
-    """Prediction mode where the model learns changes from the latest input state.
+    """Prediction mode where the model learns changes against a reference state.
+
+    The reference is the latest input of the dataset itself or of another dataset, see
+    ``AnemoiTransportTendModelEncProcDec.reference_state``.
 
     A tendency is normalised like any other source, by the state processors, as a source
     carrying the tendency statistics of its lead time; see
@@ -151,11 +154,12 @@ class TendencyPredictionMode(PredictionMode):
             msg = "Tendency prediction mode is not implemented for predicting sparse observation datasets."
             raise NotImplementedError(msg)
 
-        # The latest input state, which turns states into tendencies and tendencies back into states.
+        # The reference state in physical units, which turns states into tendencies and back.
         reference = self._tendency_model.reference_state(
             x,
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
+            self.module.model.post_processors,
         )
 
         def tendencies(states: Batch) -> Batch:
@@ -492,6 +496,12 @@ class TransportTraining(BaseTrainingModule):
                 dataset_name: target.map_data(torch.Tensor.detach)
                 for dataset_name, target in conditioned_endpoint.items()
             }
+            if prepared_target.reference is not None:
+                # The state the tendencies are added to, shown as the input of the predicted datasets.
+                plot_kwargs["plot_input"] = {
+                    dataset_name: reference.map_data(torch.Tensor.detach)
+                    for dataset_name, reference in prepared_target.reference.items()
+                }
             endpoint_prediction = self.transport_objective.reconstruct_endpoint(prediction, prepared_objective)
             metric_prediction = self.prediction_mode.reconstruct_prediction(endpoint_prediction, prepared_target)
             metric_target = self.prediction_mode.prepare_metric_target(prepared_target)

@@ -25,7 +25,7 @@ the training loop relies on:
  Our tasks
 ************
 
-The four built-in tasks are:
+The five built-in tasks are:
 
 ``Forecaster``
    Autoregressive rollout training. Inputs are ``multistep_input``
@@ -75,6 +75,18 @@ The four built-in tasks are:
         input_timestep: "6H"
         output_timestep: "3H"
         output_left_boundary: true   # include t=0 in targets
+
+``SpatialDownscaler``
+   Predicts a dataset at the times of its inputs, for example a
+   high-resolution dataset from a low-resolution one. Inputs and outputs
+   share the ``offsets``; output step i is valid at the time of input
+   step i.
+
+   .. code:: yaml
+
+      task:
+        _target_: anemoi.training.tasks.SpatialDownscaler
+        offsets: ["0H", "6H"]
 
 ``Autoencoder``
    Single-snapshot reconstruction: both input and output are at

@@ -1,0 +1,67 @@
+# Data of the spatial downscaler: a low-resolution dataset (lres), projected onto the grid of a
+# high-resolution dataset (hres) by its spatial processor, from which the model predicts hres.
+format: zarr
+# Time frequency requested from dataset
+frequency: 6h
+
+datasets:
+  lres:
+    # The model only reads lres, so all its variables are forcings (input only). The hres outputs that
+    # lres has under the same name are learned as tendencies against it (model.tendency_reference),
+    # except those listed in model.state_variables.
+    forcing: [2t, 10u, 10v, tp]
+    diagnostic: []
+    spatial_processor:
+      _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
+      file_path: ${system.input.truncation}
+      row_normalize: True
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+
+  hres:
+    # The forcings are inputs. The fields to downscale are outputs only, so the model never sees the
+    # high-resolution truth.
+    forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "lsm"
+    diagnostic: [2t, 10u, 10v, tp]
+    # Normalisation statistics of the tendencies hres - lres, one .npz file with mean, minimum,
+    # maximum and stdev entries, each a {variable: value} mapping.
+    tendency_statistics_file: ${system.input.tendency_statistics_file}
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "lsm"
+          # As in the forecaster: "std" keeps zero precipitation at zero in normalised space, so the
+          # ReLU below bounds tp at 0 in physical units.
+          std:
+          - "tp"
+      # Bounds tp to [0, infinity), as the forecaster's ReluBounding does (transport models take no
+      # bounding layers). Listed after the normaliser, so it acts on the normalised states.
+      postprocessor:
+        _target_: anemoi.models.preprocessing.postprocessor.Postprocessor
+        config:
+          default: "none"
+          relu:
+          - "tp"

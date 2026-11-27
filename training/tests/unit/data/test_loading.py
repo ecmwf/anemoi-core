@@ -152,6 +152,15 @@ def test_encoder_fusion_check_accepts_sequential_and_single_sources() -> None:
     policy.check_encoder_fusion(encoders("none", ["era5"]), DATASETS)
 
 
+def test_synchronized_policy_accepts_joint_encoder() -> None:
+    SynchronizedLoadingPolicy().check_encoder_fusion(encoders("joint", ["era5", "cerra"]), DATASETS)
+
+
+def test_multi_domain_policy_rejects_joint_encoder_over_several_domains() -> None:
+    with pytest.raises(ValueError, match=r"Encoder 'shared' has dataset_fusing_strategy 'joint'.*lacks \['cerra'\]"):
+        MultiDomainLoadingPolicy().check_encoder_fusion(encoders("joint", ["era5", "cerra"]), DATASETS)
+
+
 def test_encoder_fusion_check_ignores_sources_that_are_not_loaded() -> None:
     SynchronizedLoadingPolicy().check_encoder_fusion(encoders("none", ["era5", "unloaded"]), DATASETS)
 

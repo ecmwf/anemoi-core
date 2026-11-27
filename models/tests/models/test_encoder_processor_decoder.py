@@ -169,7 +169,6 @@ def _model_for_encoder_build(strategy: str, in_dims: dict[str, int]) -> _SharedE
 @pytest.mark.parametrize(
     ("strategy", "node_embedder", "match"),
     [
-        ("joint", LINEAR_NODE_EMBEDDER, "planned but not yet supported"),
         ("concat", None, "unsupported dataset_fusing_strategy"),
         ("sequential", None, "needs a projecting node embedder"),
         ("sequential", NOOP_NODE_EMBEDDER, "needs a projecting node embedder"),
@@ -184,10 +183,13 @@ def test_validate_fusing_strategy_rejects_invalid_settings(
         AnemoiModelEncProcDec._validate_fusing_strategy("shared", config)
 
 
-def test_validate_fusing_strategy_ignores_node_embedder_for_none(caplog: pytest.LogCaptureFixture) -> None:
-    config = _encoder_config("none", ["dataset_a"], LINEAR_NODE_EMBEDDER)["shared"]
+@pytest.mark.parametrize("strategy", ["none", "joint"])
+def test_validate_fusing_strategy_ignores_node_embedder_for_none_and_joint(
+    strategy: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = _encoder_config(strategy, ["dataset_a"], LINEAR_NODE_EMBEDDER)["shared"]
 
-    assert AnemoiModelEncProcDec._validate_fusing_strategy("shared", config) == "none"
+    assert AnemoiModelEncProcDec._validate_fusing_strategy("shared", config) == strategy
     assert "LinearNodeEmbedder is ignored and NoOpNodeEmbedder is used instead" in caplog.text
 
 

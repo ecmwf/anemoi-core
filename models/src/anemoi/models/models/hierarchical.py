@@ -82,12 +82,15 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.num_hidden = len(hidden_names)
 
         # Encoders: data -> first hidden level
+        self._check_joint_sources(static_graph)
         self.encoder_graph_provider = nn.ModuleDict()
         for dataset_name in self.dataset_names:
             if dataset_name not in self.input_datasets:
                 LOGGER.info(
                     f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
                 )
+                continue
+            if self._joint_follower(dataset_name):
                 continue
 
             encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]

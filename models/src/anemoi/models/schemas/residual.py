@@ -22,10 +22,11 @@ class SkipConnectionSchema(BaseModel):
     """Schema for skip connection residuals."""
 
     target_: Literal["anemoi.models.layers.residual.SkipConnection"] = Field(..., alias="_target_")
-    step: int = Field(
+    step: int | Literal["matching"] = Field(
         -1,
         description="Timestep index to use for the skip connection. "
-        "Defaults to -1, which selects the most recent timestep.",
+        "Defaults to -1, which selects the most recent timestep. 'matching' uses input step i for "
+        "output step i and needs as many input steps as output steps.",
     )
 
 

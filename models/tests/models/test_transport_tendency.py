@@ -16,6 +16,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.residual import BaseResidualConnection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -35,7 +36,7 @@ class IdentityProcessor(torch.nn.Module):
         return x
 
 
-class DummyResidual(torch.nn.Module):
+class DummyResidual(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
@@ -46,6 +47,23 @@ class DummyResidual(torch.nn.Module):
         del model_comm_group, n_step_output
         assert grid_shard_sizes is None
         return x
+
+
+class ConstantResidual(BaseResidualConnection):
+    """Residual connection that returns fixed values, whatever its input."""
+
+    def __init__(self, values: torch.Tensor) -> None:
+        super().__init__()
+        self.values = values
+
+    def forward(self, x: torch.Tensor, grid_shard_sizes=None, model_comm_group=None, n_step_output: int = 1):
+        del x, grid_shard_sizes, model_comm_group, n_step_output
+        return self.values
+
+
+def _physical(reference: GriddedSource, post_processors: Processors) -> GriddedSource:
+    """A normalised reference in physical units, as :meth:`reference_state` returns it."""
+    return post_processors(reference, in_place=False, skip_imputation=True, skip_output_constraints=True)
 
 
 def _make_index_collection() -> IndexCollection:
@@ -89,6 +107,8 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     model.target_datasets = ["data"]
+    model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     return model
 
 
@@ -173,7 +193,8 @@ def test_compute_tendency_normalises_each_step_with_its_tendency_statistics() ->
 
     mean, stdev = _prognostic(STATE_STATISTICS, "mean"), _prognostic(STATE_STATISTICS, "stdev")
     physical_state = state.values[..., :2] * stdev + mean
-    physical_reference = reference.values * stdev + mean
+    # The reference is in physical units.
+    physical_reference = reference.values
     for step, lead_time in enumerate(["6h", "12h"]):
         statistics = TENDENCY_STATISTICS[lead_time]
         expected = (physical_state[:, step] - physical_reference[:, 0] - _prognostic(statistics, "mean")) / _prognostic(
@@ -193,7 +214,7 @@ def test_add_tendency_to_state_inverts_compute_tendency() -> None:
     per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
 
     state = _source(torch.randn(2, 2, 1, 3, 3), ["prog0", "prog1", "diag"])
-    reference = _source(torch.randn(2, 1, 1, 3, 2), ["prog0", "prog1"])
+    reference = _physical(_source(torch.randn(2, 1, 1, 3, 2), ["prog0", "prog1"]), post_processors)
     tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
 
     normalised = model.add_tendency_to_state(
@@ -206,11 +227,49 @@ def test_add_tendency_to_state_inverts_compute_tendency() -> None:
     assert normalised.variables == state.variables
 
 
+def test_prognostic_listed_as_state_variable_is_learned_as_a_state() -> None:
+    model = _tendency_model()
+    model.state_variables = {"data": ["prog1"]}
+    pre_processors, post_processors = _normalizer_processors()
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+
+    state = _source(torch.randn(2, 2, 1, 3, 3), ["prog0", "prog1", "diag"])
+    reference = _physical(_source(torch.randn(2, 1, 1, 3, 1), ["prog0"]), post_processors)
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+
+    assert model.tendency_variables("data") == ["prog0"]
+    torch.testing.assert_close(tendency.values[..., 1:], state.values[..., 1:], rtol=0, atol=0)
+    rebuilt = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+    torch.testing.assert_close(rebuilt.values, state.values)
+
+
+@pytest.mark.parametrize(
+    ("configured", "message"),
+    [
+        ({"data": ["diag"]}, r"lists \['diag'\], which 'data' does not learn as tendencies"),
+        ({"data": ["force"]}, r"lists \['force'\], which are not outputs of 'data'"),
+        ({"other": ["prog0"]}, r"names datasets the model does not predict: \['other'\]"),
+    ],
+)
+def test_state_variables_of_a_dataset_that_is_its_own_reference_must_be_prognostic(
+    configured: dict, message: str
+) -> None:
+    model = _make_model()
+
+    assert model._resolve_state_variables({"data": ["prog1"]}, {}) == {"data": ["prog1"]}
+    with pytest.raises(ValueError, match=message):
+        model._resolve_state_variables(configured, {})
+
+
 def test_tendency_roundtrip_skips_imputation() -> None:
     imputer, data_indices = _make_imputer_settings()
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
+    model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     model.n_step_output = {"data": 1}
 
     statistics = IMPUTER_STATISTICS
@@ -257,6 +316,8 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
+    model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     model.n_step_output = {"data": 2}
 
     normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
@@ -308,40 +369,33 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
     torch.testing.assert_close(with_missing[~missing], imputed[~missing])
 
 
-def test_reference_state_is_latest_prognostic_input_with_its_statistics() -> None:
+def test_reference_state_is_latest_prognostic_input_in_physical_units() -> None:
     model = _tendency_model(n_step_output=1)
     model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
+    _, post_processors = _normalizer_processors()
     inputs = _source(torch.randn(1, 2, 1, 3, 3), ["prog0", "prog1", "force"])
 
-    reference = model.reference_state(Batch({"data": inputs}), grid_shard_sizes=None, model_comm_group=None)["data"]
+    reference = model.reference_state(
+        Batch({"data": inputs}),
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        post_processors=torch.nn.ModuleDict({"data": post_processors}),
+    )["data"]
 
     assert reference.variables == ["prog0", "prog1"]
-    torch.testing.assert_close(reference.values, inputs.values[:, -1:, ..., :2])
-    assert all(np.array_equal(reference.statistics[key], STATE_STATISTICS[key][:2]) for key in STATE_STATISTICS)
-
-
-def test_apply_reference_state_truncation_without_shards() -> None:
-    model = _make_model()
-    torch.nn.Module.__init__(model)
-    model.n_step_output = {"data": 1}
-    model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
-
-    x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}
-    out = model.apply_residual_connections(x, grid_shard_sizes=None, model_comm_group=None)
-
-    indices = model.data_indices["data"].model.input.prognostic
-    expected = x["data"][..., indices]
-    assert torch.allclose(out["data"], expected)
+    mean = torch.as_tensor(STATE_STATISTICS["mean"][:2], dtype=torch.float32)
+    stdev = torch.as_tensor(STATE_STATISTICS["stdev"][:2], dtype=torch.float32)
+    torch.testing.assert_close(reference.values, inputs.values[:, -1:, ..., :2] * stdev + mean)
 
 
 def test_sampled_to_physical_uses_latest_reference_and_per_step_statistics() -> None:
     model = _tendency_model()
 
     # Two different reference timesteps; training-style behavior should always use the last one.
-    ref = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
+    ref = torch.zeros((1, 2, 1, 2, 3), dtype=torch.float32)
     ref[:, 0] = 1.0
     ref[:, 1] = 2.0
-    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": ref}
+    model.residual = torch.nn.ModuleDict({"data": ConstantResidual(ref)})
 
     captured = []
 
@@ -365,7 +419,7 @@ def test_sampled_to_physical_uses_latest_reference_and_per_step_statistics() -> 
     assert len(captured) == 1
     dataset_name, reference, tendency_statistics = captured[0]
     assert dataset_name == "data"
-    torch.testing.assert_close(reference, ref[:, -1:])
+    torch.testing.assert_close(reference, ref[:, -1:, ..., :2])
     assert tendency_statistics == [TENDENCY_STATISTICS["6h"], TENDENCY_STATISTICS["12h"]]
 
 
@@ -423,6 +477,7 @@ def test_add_tendency_to_state_does_not_constrain_the_tendency() -> None:
     pre_processors, post_processors = _bounded_processors(model)
     per_step = model.tendency_statistics("data", ONE_STEP_TENDENCY_STATISTICS)
     reference, tendency = _bounded_case()
+    reference = _physical(reference, post_processors)
 
     physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
     normalised = model.add_tendency_to_state(
@@ -443,7 +498,7 @@ def test_compute_tendency_does_not_constrain_target_states() -> None:
     model = _tendency_model(n_step_output=1)
     pre_processors, post_processors = _bounded_processors(model)
     per_step = model.tendency_statistics("data", ONE_STEP_TENDENCY_STATISTICS)
-    reference, _ = _bounded_case()
+    reference = _physical(_bounded_case()[0], post_processors)
     state = torch.zeros(1, 1, 1, 2, 3)
     state[..., 0] = torch.tensor([(3.0 - 1.0) / 2.0, (-2.0 - 1.0) / 2.0])  # 3 and -2 in physical units
     state = _source(state, ["prog0", "prog1", "diag"])
@@ -460,7 +515,10 @@ def test_compute_tendency_does_not_constrain_target_states() -> None:
 def _bounded_sampling_model() -> tuple[AnemoiTransportTendModelEncProcDec, Batch, Batch]:
     model = _tendency_model(n_step_output=1)
     reference, tendency = _bounded_case()
-    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.values}
+    # The residual connection's output over the inputs prog0, prog1, force; force is not used.
+    model.residual = torch.nn.ModuleDict(
+        {"data": ConstantResidual(torch.cat([reference.values, torch.zeros(1, 1, 1, 2, 1)], dim=-1))}
+    )
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     return model, x, Batch({"data": tendency})
 
@@ -526,12 +584,12 @@ def test_tendency_conversion_skips_remapping() -> None:
     per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
     # Normalised (remapped) states in the domain of the sqrt remapping.
     state = _source(torch.rand(2, 2, 1, 3, 3) * 2.0, ["prog0", "prog1", "diag"])
-    reference = _source(torch.rand(2, 1, 1, 3, 2) * 2.0, ["prog0", "prog1"])
+    reference = _physical(_source(torch.rand(2, 1, 1, 3, 2) * 2.0, ["prog0", "prog1"]), post_processors)
 
     tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
 
     physical_state = post_processors(state, in_place=False, skip_output_constraints=True).values[..., :2]
-    physical_reference = post_processors(reference, in_place=False, skip_output_constraints=True).values
+    physical_reference = reference.values
     difference = physical_state - physical_reference
     assert (difference[..., 1] < 0).any(), "the test needs negative tendencies of the remapped variable"
     for step, lead_time in enumerate(["6h", "12h"]):
@@ -562,7 +620,8 @@ def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> No
     # prog1 (state mean 2, stdev 4; remapped with sqrt after normalisation): reference 6 -> normalised 1.
     reference = torch.zeros(1, 1, 1, 2, 2)
     reference[..., 1] = 1.0
-    reference = _source(reference, ["prog0", "prog1"])
+    normalised_reference = _source(reference, ["prog0", "prog1"])
+    reference = _physical(normalised_reference, post_processors)
     # 6h tendency mean 0.2, stdev 0.25: +2 -> state 8 (in the domain), -8 -> state -2 (below the mean).
     tendency = torch.zeros(1, 1, 1, 2, 3)
     tendency[..., 1] = torch.tensor([(2.0 - 0.2) / 0.25, (-8.0 - 0.2) / 0.25])
@@ -577,7 +636,9 @@ def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> No
     torch.testing.assert_close(normalised.values[0, 0, 0, :, 1], torch.tensor([1.5**0.5, 0.0]))
 
     # Inference post-processes the clipped state, as a state predicted in remapped space would be.
-    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.values}
+    model.residual = torch.nn.ModuleDict(
+        {"data": ConstantResidual(torch.cat([normalised_reference.values, torch.zeros(1, 1, 1, 2, 1)], dim=-1))}
+    )
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     out = model._sampled_to_physical(
         Batch({"data": tendency}),

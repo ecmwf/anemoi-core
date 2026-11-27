@@ -65,8 +65,9 @@ class PreparedPredictionTarget:
         the decoder reads.
 
     reference:
-        Latest input state that predicted tendencies are added to. Set by the
-        tendency prediction mode only.
+        State in physical units that predicted tendencies are added to, per
+        predicted dataset (see ``AnemoiTransportTendModelEncProcDec.reference_state``).
+        Set by the tendency prediction mode only.
     """
 
     model_target: Batch

@@ -97,6 +97,10 @@ class BaseTendencyScaler(BaseScaler):
         # Without tendency statistics every prognostic keeps a scaling of one.
         has_tendencies = self.statistics_tendencies is not None
 
+        # The prognostic variables stand for the variables learned as tendencies, as in a forecaster. In a
+        # tendency transport model the two can differ: model.state_variables learns some prognostic variables
+        # as states, and a dataset with a tendency reference from another dataset also learns diagnostics as
+        # tendencies. Such variables are weighted wrongly here.
         for key, idx in self.data_indices.model.output.name_to_index.items():
             if idx in self.data_indices.model.output.prognostic:
                 prog_idx = self.data_indices.data.output.name_to_index[key]

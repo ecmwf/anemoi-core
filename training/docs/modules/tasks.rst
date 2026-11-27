@@ -248,6 +248,30 @@ temporal downscaler.
    :no-undoc-members:
    :show-inheritance:
 
+*******************
+ SpatialDownscaler
+*******************
+
+:class:`~anemoi.training.tasks.spatial_downscaler.SpatialDownscaler`
+predicts the fields of a dataset at the times its inputs are valid, for
+example a high-resolution dataset from a low-resolution one projected
+onto its grid. It is constructed with:
+
+- ``offsets`` — the times of the snapshots (default ``["0H"]``). Inputs
+  and outputs share them, so output step i is valid at the time of input
+  step i. Several snapshots must be evenly spaced, e.g. ``["0H", "6H"]``.
+
+No output is fed back into the inputs. The metadata records the offsets
+and an empty advance map for inference. See ``spatial_downscaler.yaml``
+for a complete configuration, and :ref:`the tendency model
+<tendencies-against-another-dataset>` for the tendencies against the
+low-resolution dataset.
+
+.. automodule:: anemoi.training.tasks.spatial_downscaler
+   :members: SpatialDownscaler
+   :no-undoc-members:
+   :show-inheritance:
+
 *************
  Autoencoder
 *************

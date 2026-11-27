@@ -161,15 +161,18 @@ class EncodersSchema(BaseModel):
       ``node_embedder.num_channels`` and encoded in its own pass with the shared mapper weights, in
       the order listed in ``source_datasets``. The latents are combined by the latent
       aggregator. Source datasets may differ in their number of input channels.
-    - 'joint': planned, not yet supported.
+    - 'joint': all source datasets sit on the same grid nodes (e.g. a dataset projected onto another's grid by
+      its spatial processor). Their assembled inputs are joined along the features, node by node, and encoded
+      in one pass with the encoder edges of the first source dataset, which gives one latent. Every source
+      dataset must be in every batch. Only the first source dataset needs encoder edges in the graph.
     """
     node_embedder: Optional[NodeEmbedderSchemas] = Field(
         default_factory=lambda: NoOpNodeEmbedderSchema(_target_="anemoi.models.layers.node_embedder.NoOpNodeEmbedder")
     )
     """Per-dataset embedding onto the mapper input channels.
 
-    'none' uses ``NoOpNodeEmbedder`` (the default; ``null`` is read as it too, and any other node embedder is
-    ignored). 'sequential' needs a projecting one such as ``LinearNodeEmbedder``. A node embedder embeds node
+    'none' and 'joint' use ``NoOpNodeEmbedder`` (the default; ``null`` is read as it too, and any other node
+    embedder is ignored). 'sequential' needs a projecting one such as ``LinearNodeEmbedder``. A node embedder embeds node
     features only: the encoder edges of all source datasets must still carry the same number of edge features."""
     mapper: Union[
         GNNEncoderSchema,
@@ -183,10 +186,7 @@ class EncodersSchema(BaseModel):
 
     @model_validator(mode="after")
     def check_fusing_strategy(self) -> EncodersSchema:
-        """Reject the planned 'joint' strategy and a 'sequential' encoder without a projecting node embedder."""
-        if self.dataset_fusing_strategy == "joint":
-            msg = "dataset_fusing_strategy 'joint' is planned but not yet supported; use 'none' or 'sequential'."
-            raise ValueError(msg)
+        """Reject a 'sequential' encoder without a projecting node embedder."""
         pass_through = self.node_embedder is None or isinstance(self.node_embedder, NoOpNodeEmbedderSchema)
         if self.dataset_fusing_strategy == "sequential" and pass_through:
             msg = (
@@ -194,11 +194,12 @@ class EncodersSchema(BaseModel):
                 "node_embedder: {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}."
             )
             raise ValueError(msg)
-        if self.dataset_fusing_strategy == "none" and not pass_through:
+        if self.dataset_fusing_strategy in ("none", "joint") and not pass_through:
             LOGGER.warning(
-                "Encoder with source_datasets %s has dataset_fusing_strategy 'none'; its node embedder %s is ignored "
+                "Encoder with source_datasets %s has dataset_fusing_strategy '%s'; its node embedder %s is ignored "
                 "and NoOpNodeEmbedder is used instead.",
                 self.source_datasets,
+                self.dataset_fusing_strategy,
                 self.node_embedder.target_,
             )
         return self
@@ -386,6 +387,18 @@ class TransportModelSchema(BaseModelSchema):
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
     "Whether the encoder also reads the residual connection's reference state next to the noisy tendency."
+    tendency_reference: dict[str, str] = Field(default_factory=dict)
+    (
+        "Reference dataset of each predicted dataset, {predicted: reference}; by default a dataset is its own "
+        "reference. Outputs that the reference dataset has as inputs under the same name are learned as "
+        "tendencies against its latest input, built by the reference dataset's residual connection."
+    )
+    state_variables: dict[str, list[str]] = Field(default_factory=dict)
+    (
+        "Outputs of each predicted dataset learned as states instead of tendencies, {predicted: [variables]}. "
+        "A dataset that is its own reference may list only prognostic variables. Every output of a dataset with a "
+        "reference from another dataset must be an input of the reference dataset or listed here."
+    )
 
 
 class HierarchicalModelSchema(BaseModelSchema):
