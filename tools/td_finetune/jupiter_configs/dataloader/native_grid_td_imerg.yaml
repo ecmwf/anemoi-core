@@ -1,0 +1,120 @@
+# Copy of native_grid_td_no_var_no_w.yaml (same variables as the pretrained TD) plus hourly IMERG
+# joined in as the `imerg` target variable. Differences from the original:
+#  - an IMERG member in every split's dataset list (valid-time join);
+#  - the test split now uses the same drop list and explicit start/end on every member as
+#    train/validation (the original test split used drop: [] and members without dates, which
+#    cannot be joined with a dataset that ends 2025-10-01).
+prefetch_factor: 1
+persistent_workers: False
+pin_memory: True
+
+# read_group_size:
+#   Form subgroups of model comm groups that read data together; the number of GPUs per model
+#   must be divisible by read_group_size. To disable, set to 1.
+read_group_size: ${system.hardware.num_gpus_per_model}
+
+num_workers:
+  training: 6
+  validation: 2
+  test: 4
+batch_size:
+  training: 1
+  validation: 1
+  test: 4
+
+limit_batches:
+  training: null
+  validation: 100
+  test: 20
+
+# Pointers to datasets and model run info
+dataset: ${system.input.dataset}
+
+trajectory_sampling:
+  stride: null
+
+training:
+  datasets:
+    data:
+      dataset_config:
+        dataset:
+          - dataset: ${dataloader.dataset}
+            drop: ['u_10', 'v_10', 'w_10', 'z_10', 'q_10', 't_10', 'u_70', 'v_70', 'w_70', 'z_70', 'q_70', 't_70', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'swvl1', 'swvl2', 'snowc', 'sd', 'sf', 'stl1', 'stl2']
+            start: 2016-01-01
+            end: 2024-12-31
+          - dataset: ${system.input.auxiliary_dataset}
+            select: ['sdor', 'slor']
+            interpolate_frequency: 1h
+            start: 2016-01-01
+            end: 2024-12-31
+          # Hourly IMERG, joined onto the trajectory by valid time (base_date + step) inside open_dataset.
+          # start/end must be set on every member: the join needs each member to cover the
+          # trajectory's whole valid-time range, and IMERG ends 2025-10-01.
+          - dataset: ${system.input.imerg_dataset}
+            select: ['tp']
+            rename:
+              tp: imerg
+            start: 2016-01-01
+            end: 2024-12-31
+      start: 2016-01-01
+      end: 2024-12-31
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+
+validation:
+  datasets:
+    data:
+      dataset_config:
+        dataset:
+          - dataset: ${dataloader.dataset}
+            drop: ['u_10', 'v_10', 'w_10', 'z_10', 'q_10', 't_10', 'u_70', 'v_70', 'w_70', 'z_70', 'q_70', 't_70', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'swvl1', 'swvl2', 'snowc', 'sd', 'sf', 'stl1', 'stl2']
+            start: 2025-01-01
+            end: 2025-01-31
+          - dataset: ${system.input.auxiliary_dataset}
+            select: ['sdor', 'slor']
+            interpolate_frequency: 1h
+            start: 2025-01-01
+            end: 2025-01-31
+          # Hourly IMERG, joined onto the trajectory by valid time (base_date + step) inside open_dataset.
+          # start/end must be set on every member: the join needs each member to cover the
+          # trajectory's whole valid-time range, and IMERG ends 2025-10-01.
+          - dataset: ${system.input.imerg_dataset}
+            select: ['tp']
+            rename:
+              tp: imerg
+            start: 2025-01-01
+            end: 2025-01-31
+      start: 2025-01-01
+      end: 2025-01-31
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+
+test:
+  datasets:
+    data:
+      dataset_config:
+        dataset:
+          - dataset: ${dataloader.dataset}
+            drop: ['u_10', 'v_10', 'w_10', 'z_10', 'q_10', 't_10', 'u_70', 'v_70', 'w_70', 'z_70', 'q_70', 't_70', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'swvl1', 'swvl2', 'snowc', 'sd', 'sf', 'stl1', 'stl2']
+            start: 2025-02-28
+            end: 2025-07-31
+          - dataset: ${system.input.auxiliary_dataset}
+            select: ['sdor', 'slor']
+            interpolate_frequency: 1h
+            start: 2025-02-28
+            end: 2025-07-31
+          # Hourly IMERG, joined onto the trajectory by valid time (base_date + step) inside open_dataset.
+          # start/end must be set on every member: the join needs each member to cover the
+          # trajectory's whole valid-time range, and IMERG ends 2025-10-01.
+          - dataset: ${system.input.imerg_dataset}
+            select: ['tp']
+            rename:
+              tp: imerg
+            start: 2025-02-28
+            end: 2025-07-31
+      start: 2025-02-28
+      end: 2025-07-31
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}

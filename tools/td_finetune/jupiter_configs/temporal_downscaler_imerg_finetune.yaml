@@ -1,0 +1,206 @@
+# Fine-tune of the pretrained temporal downscaler (run 4753602a..., 150k steps) on hourly IMERG with the
+# latitude-blended tp loss (oper_lat_weight / imerg_lat_weight), mirroring the IMERG forecaster fine-tune.
+# Base: temporal_downscaler_full_no_var_no_w.yaml. Starts a NEW run (run_id: null) from the weights of the
+# base run's last.ckpt (transfer_learning + load_weights_only, so optimiser/scheduler state is not restored).
+defaults:
+- data: zarr_td_imerg
+- dataloader: native_grid_td_imerg
+- diagnostics: evaluation_ens
+- system: slurm
+- graph: multi_scale_knn
+- model: graphtransformer_ens_td
+- task: temporal_downscaler
+- training: ensemble
+- _self_
+
+config_validation: True
+
+diagnostics:
+  plot:
+    datasets_to_plot: [data]
+    frequency:
+      batch: 750
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        parameter_groups:
+          moisture: [tp, cp, tcw]
+          sfc_wind: [10u, 10v]
+          cloud: [hcc, lcc, mcc]
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+
+# IMPORTANT: the base graph config has overwrite: True, which would REBUILD the graph from config and
+# overwrite system.input.graph at start-up, dropping the lat-blend node weights. Load the grafted file.
+graph:
+  overwrite: False
+
+system:
+  input:
+    dataset: /e/data1/jureap-data/ecmwf/ai-ml/datasets/aifs-od-fc-oper-0001-mars-n320-2016-2025-6h-1h-v5.zarr
+    auxiliary_dataset: /e/data1/jureap-data/ai-ml/datasets/aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr
+    # hourly IMERG (aifs-imerg-final-v07b-nasa-n320-1998-2025-1h-v1); set to wherever the copy lands
+    imerg_dataset: /e/data1/jureap-data/ecmwf/ai-ml/datasets/aifs-imerg-final-v07b-nasa-n320-1998-2025-1h-v1-observations.zarr
+    # TD n320 graph (unchanged edges) + oper_lat_weight / imerg_lat_weight node weights from graph_imerg_latblend_phi50.pt
+    # built with td_imerg/graft_node_attrs.py
+    graph: /e/project1/gkpdm/clare1/td_imerg/graph_td_n320_latblend_phi50.pt
+    warm_start: /e/scratch/gkpdm/clare1/new/checkpoint/4753602af6034d85857dbcd6bcd0e3a9/last.ckpt
+    loss_matrices_path: null
+  hardware:
+    accelerator: auto
+    num_gpus_per_ensemble: 2
+    num_gpus_per_model: 1
+
+task:
+  input_timestep: 6H
+  output_timestep: 1H
+  output_left_boundary: False
+  output_right_boundary: True  # target includes step 6
+
+dataloader:
+  limit_batches:
+    training: 2500   # one "epoch" = 2500 steps -> validation + checkpoint every 2500 steps
+    validation: 100
+  trajectory_sampling:
+    stride: 1
+
+training:
+  run_id: null
+  fork_run_id: null
+  transfer_learning: True
+  load_weights_only: True
+  num_sanity_val_steps: 0
+  # ---- fine-tuning schedule (see the recommendation in the chat) -------------------------------------
+  # Effective peak lr = num_nodes * gpus_per_node * lr / num_gpus_per_ensemble (ensemble.py). With the
+  # jobscripts' SLURM_NNODES=4 and 4 GPUs/node, 2 GPUs per ensemble: 4*4*lr/2 = 8*lr.
+  # lr 6.25e-7 -> effective 5e-6 (pretraining peak was 3e-5 -> 2.4e-4, final 3e-7).
+  max_steps: 10000
+  optimization:
+    lr: 6.25e-7
+    lr_scheduler:
+      warmup_t: 300
+      t_initial: ${training.max_steps}   # cosine runs for the whole fine-tune; override training.max_steps only
+      lr_min: 3e-7
+  ensemble_size_per_device: 1
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            w: 0.1
+            sd: 0.005
+            stl2: 0.25
+            tp: 0.25
+            cp: 0.025
+            10fg: 0.5
+        # identical to general_variable but with tp switched off: tp is handled by the lat-blended terms below
+        general_variable_notp:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            w: 0.1
+            sd: 0.005
+            stl2: 0.25
+            tp: 0.0
+            cp: 0.025
+            10fg: 0.5
+        oper_lat_weight:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_attribute_name: oper_lat_weight
+          norm: null
+        imerg_lat_weight:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_attribute_name: imerg_lat_weight
+          norm: null
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        ignore_nans: False
+        # [per-step, time-aggregate] terms for everything except tp (0.6 / 0.4 as in pretraining), then the
+        # tp-only terms with weight (0.6 or 0.4)/87: 87 = number of loss variables, so that tp keeps the share
+        # it had in the original per-variable average, now split by latitude between the forecast and IMERG.
+        loss_weights: [0.6, 0.4, 0.006896552, 0.006896552, 0.004597701, 0.004597701]
+        losses:
+        # 1. per-step, all variables except tp
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.CRPS
+            scalers: ['pressure_level', 'general_variable_notp', 'nan_mask_weights', 'node_weights', 'time_steps', 'stdev_tendency']
+            ignore_nans: False
+            no_autocast: True
+            alpha: 0.95
+        # 2. time-aggregate, all variables except tp
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+            scalers: ['pressure_level', 'general_variable_notp', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
+            time_aggregation_types: [mean, max, min, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.CRPS
+              ignore_nans: False
+              no_autocast: True
+              alpha: 0.95
+        # 3. per-step tp vs forecast tp, weighted towards high latitudes
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.CRPS
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps', 'stdev_tendency', 'oper_lat_weight']
+            ignore_nans: False
+            predicted_variables: [tp]
+            target_variables: [tp]
+            check_variables_compatibility: {ignore_units: false, ignore_processing_period: false, ignore_time_processing: false, ignore_type_of_level: false}
+            no_autocast: True
+            alpha: 0.95
+        # 4. per-step tp vs IMERG, weighted towards the tropics/mid-latitudes
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.CRPS
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps', 'stdev_tendency', 'imerg_lat_weight']
+            ignore_nans: True
+            predicted_variables: [tp]
+            target_variables: [imerg]
+            check_variables_compatibility: {ignore_units: false, ignore_processing_period: true, ignore_time_processing: false, ignore_type_of_level: false}
+            no_autocast: True
+            alpha: 0.95
+        # 5. time-aggregate tp vs forecast tp
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency', 'oper_lat_weight']
+            time_aggregation_types: [mean, max, min, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.CRPS
+              ignore_nans: False
+              predicted_variables: [tp]
+              target_variables: [tp]
+              check_variables_compatibility: {ignore_units: false, ignore_processing_period: false, ignore_time_processing: false, ignore_type_of_level: false}
+              no_autocast: True
+              alpha: 0.95
+        # 6. time-aggregate tp vs IMERG
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency', 'imerg_lat_weight']
+            time_aggregation_types: [mean, max, min, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.CRPS
+              ignore_nans: True
+              predicted_variables: [tp]
+              target_variables: [imerg]
+              check_variables_compatibility: {ignore_units: false, ignore_processing_period: true, ignore_time_processing: false, ignore_type_of_level: false}
+              no_autocast: True
+              alpha: 0.95

@@ -1,0 +1,114 @@
+# Copy of zarr_td.yaml with hourly IMERG as an extra *target* variable (not a model input or output).
+# imerg is normalised with the tp statistics (remap imerg: tp), as in the IMERG forecaster fine-tune.
+format: zarr
+# Time frequency requested from dataset
+# null = trajectory dataset reads step frequency directly from the zarr
+frequency: null
+
+datasets:
+  data: # user-defined name for the dataset
+    # features that are not part of the forecast state
+    # but are used as forcing to generate the forecast state
+    forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - insolation
+      - lsm
+      - z
+      - sdor
+      - slor
+
+    # features that are only part of the forecast state
+    # but are not used as the input to the model
+    diagnostic:
+    - tp
+    - cp
+    - ssrd
+    - strd
+    - ssr
+    - 10fg
+    - 100u
+    - 100v
+    - fdir
+    - ro
+
+    # variables that are only used as loss targets (not model inputs, not model outputs)
+    target:
+    - imerg
+
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+
+          # Remap cp statistics to those of tp when using FractionBounding, and imerg to tp
+          # so that the IMERG target is normalised exactly like the forecast tp.
+          remap:
+            cp: tp
+            ssr: ssrd
+            imerg: tp
+          # "Std" normalization is preferred here over "mean-std" to avoid shifting of the
+          # zero value in the normalized space.
+          std:
+          - "10fg"
+          - "tp"
+          - "imerg"
+          - "cp"
+          - "tcw"
+          - "ssrd"
+          - "strd"
+          - "ssr"
+          - "fdir"
+          - "ro"
+          - q_50
+          - q_100
+          - q_150
+          - q_200
+          - q_250
+          - q_300
+          - q_400
+          - q_500
+          - q_600
+          - q_700
+          - q_850
+          - q_925
+          - q_1000
+          min-max:
+          max:
+          - "z"
+          - "sdor"
+          - "slor"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "insolation"
+          - "lsm"
+          - "tcc"
+          - "mcc"
+          - "hcc"
+          - "lcc"
+      const_imputer:
+        _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+        config:
+          default: "none"
+          0:
+          - ro
+      # When using the imputer, consider including the nan_mask_weights scaler in the
+      # training loss to ensure imputed grid points are not considered in the loss computation
+
+
+# Values set in the code
+num_features: null # number of features in the forecast state
