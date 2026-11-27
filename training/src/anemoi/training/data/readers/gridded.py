@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Callable
 from functools import cached_property
+from functools import wraps
 
 import numpy as np
 import torch
@@ -25,6 +27,43 @@ from anemoi.training.utils.time_indices import TimeIndices
 LOGGER = logging.getLogger(__name__)
 
 
+def cache_data(get_data: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+    """Read the records of a sample from the dataset cache, and read only the other records from the dataset.
+
+    A record is one position of one sequence, for the grid shard of this reader. Without a cache
+    (see :meth:`GriddedDataReader.set_cache`), the wrapper calls ``get_data`` directly.
+    """
+
+    @wraps(get_data)
+    def wrapper(self: "GriddedDataReader", sequence: int, positions: TimeIndices) -> torch.Tensor:
+        if self._cache is None:
+            return get_data(self, sequence, positions)
+
+        positions = self.position_list(sequence, positions)
+        grid_indices = self.grid_shard_slice
+        records, missing = self._cache.check_cache(self._cache_dataset_id, sequence, positions, grid_indices)
+        if missing:
+            source_positions = [positions[index] for index in missing]
+            source = get_data(self, sequence, source_positions)
+            # The records keep the order of the dimensions of the zarr store. Then the values of
+            # one variable are next to each other, and the blosc bitshuffle compresses them better.
+            source = rearrange(
+                source.numpy(),
+                "dates ensemble gridpoints variables -> dates variables ensemble gridpoints",
+            )
+            self._cache.store_records(self._cache_dataset_id, sequence, source_positions, source, grid_indices)
+            for index, value in zip(missing, source, strict=True):
+                records[index] = value
+
+        values = rearrange(
+            np.stack(records),
+            "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+        )
+        return torch.from_numpy(values)
+
+    return wrapper
+
+
 class GriddedDataReader(BaseAnemoiReader):
     """Gridded dataset reader with static grid."""
 
@@ -34,6 +73,30 @@ class GriddedDataReader(BaseAnemoiReader):
     #: or ``None`` when a single reader reads the whole grid.
     grid_shard_sizes: list[int] | None = None
     grid_shard_slice: slice | None = None
+
+    #: The dataset cache (see :meth:`set_cache`). If None, all records are read from the dataset.
+    _cache = None
+    _cache_dataset_id: str | None = None
+
+    def set_cache(self, cache: object, dataset_id: str) -> None:
+        """Send the data reads through the dataset cache, as the records of ``dataset_id``."""
+        self._cache = cache
+        self._cache_dataset_id = dataset_id
+
+    @property
+    def num_sequences(self) -> int:
+        """Return the number of sequences. An analysis dataset has one sequence."""
+        return 1
+
+    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
+        """Return the number of positions (dates) in a sequence."""
+        return len(self.dates)
+
+    def position_list(self, sequence: int, positions: TimeIndices) -> list[int]:
+        """Return the positions as a list of integers."""
+        if isinstance(positions, slice):
+            return list(range(*positions.indices(self.sequence_length(sequence))))
+        return np.atleast_1d(positions).tolist()
 
     @property
     def layout(self) -> TensorLayout:
@@ -92,6 +155,7 @@ class GriddedDataReader(BaseAnemoiReader):
             self.grid_shard_slice,
         )
 
+    @cache_data
     def get_data(
         self,
         sequence: int,

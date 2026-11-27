@@ -1,5 +1,10 @@
 prefetch_factor: 2
 pin_memory: True
+# Number of blosc threads in each dataloader worker, for the decompression of
+# zarr chunks and for the dataset cache. If null, blosc uses one thread in a
+# worker. Keep (GPUs per node) x (workers per GPU) x blosc_threads below the
+# number of CPU cores of the node.
+blosc_threads: 4
 # keep dataloader workers alive between epochs instead of starting new ones every epoch
 persistent_workers: False
 fake_dataloading: False

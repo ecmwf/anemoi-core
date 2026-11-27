@@ -9,8 +9,10 @@
 
 
 import logging
+import multiprocessing
 from collections.abc import Callable
 from functools import cached_property
+from functools import partial
 from typing import Any
 
 import pytorch_lightning as pl
@@ -30,6 +32,7 @@ from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +40,9 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
+
+    # the dataset cache, made in setup() if system.hardware.cache_dir is set
+    cache = None
 
     def __init__(self, config: BaseSchema, task: BaseTask) -> None:
         """Initialize Multi-dataset data module.
@@ -161,9 +167,48 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
         return dataset
 
+    def setup(self, stage: str | None = None) -> None:
+        """Start the dataset cache if ``system.hardware.cache_dir`` is set.
+
+        Lightning calls this method on each rank, after it starts torch distributed.
+        """
+        del stage
+        hardware = getattr(getattr(self.config, "system", None), "hardware", None)
+        # configs that are not validated can have no system.hardware.cache_dir: then there is no cache
+        if getattr(hardware, "cache_dir", None) is None or self.cache is not None:
+            return
+        # null uses the default of the platform, which is not fork on macOS, or on Linux from Python 3.14
+        context = self.config.dataloader.get("multiprocessing_context", None) or multiprocessing.get_start_method()
+        if context != "fork":
+            msg = (
+                f"The dataset cache needs fork dataloader workers, not {context}. Set multiprocessing_context to fork."
+            )
+            raise ValueError(msg)
+        # imported here because the cache needs pyzmq, an optional dependency
+        from anemoi.training.utils.dataset_cache import DatasetCache
+
+        LOGGER.info("Caching datasets under '%s'", hardware.cache_dir)
+        self.cache = DatasetCache(
+            hardware.cache_dir,
+            hostname_suffix=hardware.hostname_suffix,
+            max_fraction=hardware.cache_max_fraction,
+        )
+        self.cache.setup()
+        self.cache.attach(self.ds_train.data_readers)
+        self.cache.attach(self.ds_valid.data_readers)
+
+    def teardown(self, stage: str | None = None) -> None:
+        """Stop the dataset cache."""
+        del stage
+        if self.cache is not None:
+            self.cache.teardown()
+            self.cache = None
+
     def set_epoch(self, epoch: int) -> None:
         """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        if self.cache is not None:
+            self.cache.log_counters()
         self.sync_dataset_state()
 
     def sync_dataset_state(self) -> None:
@@ -249,8 +294,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
-            import multiprocessing
-
             ctx = self.config.dataloader.multiprocessing_context
             extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
 
@@ -261,6 +304,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             batch_sampler=batch_sampler,
             num_workers=num_workers,
             pin_memory=self.config.dataloader.pin_memory,
+            worker_init_fn=partial(worker_init_func, blosc_threads=self.config.dataloader.get("blosc_threads")),
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=self.config.dataloader.get("persistent_workers", False),
             collate_fn=self._make_collate_fn(ds),

@@ -16,6 +16,7 @@ from einops import rearrange
 from rich.tree import Tree
 
 from anemoi.training.data.readers.gridded import GriddedDataReader
+from anemoi.training.data.readers.gridded import cache_data
 from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
@@ -112,6 +113,7 @@ class TrajectoryDataReader(GriddedDataReader):
             raise ValueError(msg)
         return freq
 
+    @cache_data
     def get_data(self, sequence: int, positions: TimeIndices) -> torch.Tensor:
         """Return steps ``positions`` of initialisation ``sequence`` as ``(steps, ensemble, grid, variables)``."""
         if isinstance(positions, slice):

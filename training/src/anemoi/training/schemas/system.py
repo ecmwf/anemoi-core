@@ -35,6 +35,12 @@ class HardwareSchema(BaseModel):
     "Number of GPUs per model."
     num_gpus_per_ensemble: NonNegativeInt = 1
     "Number of GPUs per ensemble."
+    cache_dir: Path | None = None
+    "Directory for the node-local dataset cache."
+    cache_max_fraction: Annotated[float, Field(gt=0, le=1)] = 0.9
+    "The cache stops writing when less than (1 - cache_max_fraction) of its disk is free."
+    hostname_suffix: str | None = None
+    "Text to add to each hostname for cache connections between nodes, for example the high-speed network name."
 
 
 class InputSchema(PydanticBaseModel):

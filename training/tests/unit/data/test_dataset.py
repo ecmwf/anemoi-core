@@ -167,6 +167,33 @@ class TestGriddedDataReader:
         torch.testing.assert_close(sample.coordinates, full.coordinates[dataset.grid_shard_slice])
 
 
+def test_gridded_data_reader_reads_and_stores_only_cache_misses() -> None:
+    data = np.arange(5 * 3 * 2 * 6).reshape(5, 3, 2, 6)
+    reader = GriddedDataReader.__new__(GriddedDataReader)
+    reader.data = data
+    reader.grid_shard_slice = slice(0, 4)
+    stored = {}
+
+    class FakeCache:
+        def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+            assert dataset_id == "analysis"
+            return [data[positions[0], ..., grid_indices], None], [1]
+
+        def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+            stored["positions"] = positions
+            stored["values"] = values
+            stored["grid_indices"] = grid_indices
+
+    reader.set_cache(FakeCache(), "analysis")
+    values = reader.get_data(0, [1, 3])
+
+    expected = np.transpose(data[[1, 3], ..., :4], (0, 2, 3, 1))
+    np.testing.assert_array_equal(values.numpy(), expected)
+    assert stored["positions"] == [3]
+    assert stored["grid_indices"] == slice(0, 4)
+    np.testing.assert_array_equal(stored["values"], data[[3], ..., :4])
+
+
 @skip_if_offline
 def test_gridded_data_reader_accepts_dataset_dictionary(dataset_path: str) -> None:
     original = GriddedDataReader(dataset_config=dataset_path)

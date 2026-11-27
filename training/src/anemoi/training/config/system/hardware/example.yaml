@@ -3,3 +3,6 @@ accelerator: cuda # Run on GPU (for historical reasons, this is still called "cu
 num_gpus_per_node: 1
 num_nodes: 1
 num_gpus_per_model: 1
+cache_dir: null # directory on a local disk of each node for the dataset cache, for example ${oc.decode:${oc.env:TMPDIR}}; null: no cache
+cache_max_fraction: 0.9 # the cache stops when less than (1 - cache_max_fraction) of the disk is free
+hostname_suffix: null # text to add to each hostname for the connections between the caches of the nodes, for example -ib

@@ -45,6 +45,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/models
    user-guide/tracking
    user-guide/benchmarking
+   user-guide/dataset-caching
    user-guide/distributed
    user-guide/download-era5-o96
    user-guide/performance-optimisation

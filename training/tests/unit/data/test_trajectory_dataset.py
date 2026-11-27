@@ -190,6 +190,53 @@ class TestTrajectoryDataReaderGetSample:
         sample = reader.get_sample(0, [0, 1])
         assert sample.values.shape == (2, 2, 10, 3)
 
+    def test_get_data_uses_sequence_aware_cache(self) -> None:
+        reader = _make_reader(num_base_dates=3, variables=3, ensemble=2, steps=6, gridpoints=10)
+        reader.set_reader_group_info(reader_group_rank=0, reader_group_size=2)
+        data = reader.data._data
+
+        class FakeCache:
+            def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+                assert dataset_id == "forecast"
+                assert grid_indices == slice(0, 5)
+                result = np.transpose(data[sequence][:, :, positions, :], (2, 0, 1, 3))[..., grid_indices]
+                return list(result), []
+
+            def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+                raise AssertionError("cache hit should not be stored")
+
+        reader.set_cache(FakeCache(), "forecast")
+        values = reader.get_data(2, [1, 3])
+
+        expected = np.transpose(data[2][:, :, [1, 3], :5], (2, 1, 3, 0))
+        np.testing.assert_array_equal(values.numpy(), expected)
+        assert reader.data.read_keys == []
+
+    def test_get_data_reads_and_stores_only_cache_misses(self) -> None:
+        reader = _make_reader(num_base_dates=3, variables=3, ensemble=2, steps=6, gridpoints=10)
+        reader.set_reader_group_info(reader_group_rank=0, reader_group_size=2)
+        data = reader.data._data
+        stored = {}
+
+        class FakeCache:
+            def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+                cached = np.transpose(data[sequence][:, :, [positions[0]], :], (2, 0, 1, 3))[0, ..., grid_indices]
+                return [cached, None], [1]
+
+            def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+                stored["positions"] = positions
+                stored["values"] = values
+                stored["grid_indices"] = grid_indices
+
+        reader.set_cache(FakeCache(), "forecast")
+        values = reader.get_data(2, [1, 3])
+
+        raw = data[2][:, :, [1, 3], :5]
+        np.testing.assert_array_equal(values.numpy(), np.transpose(raw, (2, 1, 3, 0)))
+        assert stored["positions"] == [3]
+        assert stored["grid_indices"] == slice(0, 5)
+        np.testing.assert_array_equal(stored["values"], np.transpose(raw[..., 1:2, :], (2, 0, 1, 3)))
+
     @pytest.mark.parametrize(
         ("positions", "step_slice", "steps"),
         [
