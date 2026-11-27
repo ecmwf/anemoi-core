@@ -34,7 +34,8 @@ def test_inspect_on_gpu(
     graph_path = tmp_path / "graph.pt"
     output_path = tmp_path / "inspect"
 
-    GraphCreator(config=tmp_path / config_name).create(save_path=graph_path)
+    graph_creator = GraphCreator.initialize_from_config(tmp_path / config_name)
+    graph_creator.create_graph(save_path=graph_path)
     assert graph_path.exists()
 
     result = subprocess.run(
