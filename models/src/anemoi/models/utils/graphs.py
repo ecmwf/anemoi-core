@@ -174,9 +174,9 @@ def build_graph(
         [(cfg.source_name, "to", cfg.target_name) for cfg in graph_config.edges],
     )
     graph_creator = GraphCreator.initialize_from_config(graph_config)
-    graph = graph_creator.update_graph(graph)
-    graph = graph_creator.clean(graph)
-    graph = graph_creator.post_process(graph)
+    graph_creator.update_graph(graph)
+    graph_creator.clean(graph)
+    graph_creator.post_process(graph)
     if graph_path is not None:
         graph_creator.save(graph, save_path=graph_path, overwrite=overwrite)
 
