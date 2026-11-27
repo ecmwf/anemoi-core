@@ -105,7 +105,7 @@ class SparseProjector(torch.nn.Module):
         x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, batch_size * channels)
 
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            if projection_matrix.layout == torch.strided:
+            out = torch.sparse.mm(projection_matrix, x_rhs)
                 # Dense matrix (deterministic mode, see forward):
                 # [M, N] @ [N, B*C] -> [M, B*C]
                 out = torch.mm(projection_matrix, x_rhs)
