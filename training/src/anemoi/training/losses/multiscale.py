@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -30,6 +31,10 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 
 LOGGER = logging.getLogger(__name__)
+
+# Select the variables of an inner LossVariableMapper before smoothing instead of after (same maths: the smoothing is
+# applied independently to every variable). Set ANEMOI_NO_LOSS_PREFILTER=1 to get the stock behaviour back.
+PREFILTER_VARIABLES = os.environ.get("ANEMOI_NO_LOSS_PREFILTER", "0") != "1"
 
 
 class MultiscaleLossWrapper(BaseLossWrapper):
@@ -317,6 +322,19 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             )
         return x, y
 
+    def _variable_mapper_to_prefilter(self):
+        """Return the LossVariableMapper below this wrapper if it selects a variable subset, else None."""
+        from anemoi.training.losses.variable_mapper import LossVariableMapper
+
+        node = self.loss
+        for _ in range(6):
+            if isinstance(node, LossVariableMapper):
+                return node if node.predicted_variables is not None else None
+            node = getattr(node, "loss", None) or getattr(node, "loss_fn", None)
+            if node is None:
+                return None
+        return None
+
     def forward(
         self,
         y_pred_ens: torch.Tensor,
@@ -331,6 +349,22 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         grid_dim: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        mapper = self._variable_mapper_to_prefilter()
+        if (
+            PREFILTER_VARIABLES
+            and squash
+            and mapper is not None
+            and kwargs.get("pred_layout") is not None
+            and kwargs.get("target_layout") is not None
+            and not kwargs.get("variables_prefiltered", False)
+        ):
+            pred_layout = mapper._to_layout(kwargs["pred_layout"], layout_name="pred_layout")
+            target_layout = mapper._to_layout(kwargs["target_layout"], layout_name="target_layout")
+            if pred_layout in mapper.predicted_indices_by_layout and target_layout in mapper.target_indices_by_layout:
+                y_pred_ens = y_pred_ens[..., mapper.predicted_indices_by_layout[pred_layout]].contiguous()
+                y = y[..., mapper.target_indices_by_layout[target_layout]].contiguous()
+                kwargs = {**kwargs, "variables_prefiltered": True}
+
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
         is_model_sharded = grid_shard_sizes is not None

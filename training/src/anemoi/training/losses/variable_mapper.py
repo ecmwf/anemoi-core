@@ -308,6 +308,7 @@ class LossVariableMapper(BaseLossWrapper):
         squash_mode: Squash_mode | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        variables_prefiltered: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         if self.data_indices is None:
@@ -338,13 +339,22 @@ class LossVariableMapper(BaseLossWrapper):
         pred_indices = self.predicted_indices_by_layout[pred_layout]
         target_indices = self.target_indices_by_layout[target_layout]
 
-        pred_filtered = pred[..., pred_indices]
-        target_filtered = target[..., target_indices]
+        if variables_prefiltered:
+            # A wrapper above us (MultiscaleLossWrapper) already selected exactly these variables
+            # (see MultiscaleLossWrapper.forward), so that its smoothing only sees them.
+            assert pred.shape[-1] == len(pred_indices) and target.shape[-1] == len(target_indices), (
+                f"variables_prefiltered but shapes {tuple(pred.shape)} / {tuple(target.shape)} do not match "
+                f"the {len(pred_indices)} predicted / {len(target_indices)} target variables"
+            )
+            pred_filtered, target_filtered = pred, target
+        else:
+            pred_filtered = pred[..., pred_indices]
+            target_filtered = target[..., target_indices]
 
-        # torch.compile performance change
-        # Make contiguous to prevent a changing stride forcing specialisation
-        pred_filtered = pred_filtered.contiguous()
-        target_filtered = target_filtered.contiguous()
+            # torch.compile performance change
+            # Make contiguous to prevent a changing stride forcing specialisation
+            pred_filtered = pred_filtered.contiguous()
+            target_filtered = target_filtered.contiguous()
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
