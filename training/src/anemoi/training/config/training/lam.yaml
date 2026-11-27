@@ -14,10 +14,6 @@ defaults:
 # continues from, or draws a new one for a new run
 seed: null
 
-update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
-
 # Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
 # dataset (fine-tuning / transfer learning). Set ignore_units/ignore_processing_period to True to
 # skip those checks globally, or to a list of variable names to skip only those variables.

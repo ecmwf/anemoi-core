@@ -10,6 +10,7 @@
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -20,8 +21,12 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.losses.scaler_tensor import as_dimension_tuple
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -112,10 +117,10 @@ class LossVariableMapper(BaseLossWrapper):
 
     def _filter_variable_axis_scaler(
         self,
-        dimension: int | tuple[int],
+        dimension: int | str | tuple[int | str, ...],
         scaler: torch.Tensor,
     ) -> torch.Tensor:
-        dims = (dimension,) if isinstance(dimension, int) else tuple(dimension)
+        dims = as_dimension_tuple(dimension)
         if TensorDim.VARIABLE not in dims:
             return scaler
 
@@ -257,24 +262,6 @@ class LossVariableMapper(BaseLossWrapper):
             return original_indexer.new_tensor(mapped_indices, dtype=torch.long)
         return mapped_indices
 
-    @staticmethod
-    def _select_variables(x: torch.Tensor, indices: list[int]) -> torch.Tensor:
-        """Select ``indices`` along the last (variable) dimension of ``x``.
-
-        Equivalent to ``x[..., indices]``, but avoids advanced indexing: its sort-based backward
-        is slow on GPU and dominated the step time for losses on large grids. Selecting all
-        variables in order is a no-op, a contiguous block is a slice, and anything else uses
-        ``index_select``, whose backward is a single scatter-add.
-        """
-        num_selected = len(indices)
-        start = indices[0] if num_selected else 0
-        if indices == list(range(start, start + num_selected)):
-            if start == 0 and num_selected == x.shape[-1]:
-                return x
-            return x.narrow(-1, start, num_selected)
-        index = torch.as_tensor(indices, dtype=torch.long, device=x.device)
-        return x.index_select(-1, index)
-
     def _remap_scaler_indices_for_filtered_pred(
         self,
         scaler_indices: tuple[Any, ...],
@@ -315,8 +302,8 @@ class LossVariableMapper(BaseLossWrapper):
 
     def forward(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
+        pred: "Source",
+        target: "Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[Any, ...] | None = None,
@@ -356,8 +343,8 @@ class LossVariableMapper(BaseLossWrapper):
         pred_indices = self.predicted_indices_by_layout[pred_layout]
         target_indices = self.target_indices_by_layout[target_layout]
 
-        pred_filtered = self._select_variables(pred, pred_indices)
-        target_filtered = self._select_variables(target, target_indices)
+        pred_filtered = pred.select(variables=pred_indices)
+        target_filtered = target.select(variables=target_indices)
 
         # torch.compile performance change
         # Make contiguous to prevent a changing stride forcing specialisation
@@ -388,18 +375,18 @@ class LossVariableMapper(BaseLossWrapper):
         if empty_metric_selection:
             if squash:
                 return torch.zeros((), dtype=pred.dtype, device=pred.device, requires_grad=False)
-            len_model_output = pred.shape[-1]
+            len_model_output = len(pred.variables)
             return torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         if squash:
             return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
-        len_model_output = pred.shape[-1]
-        loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
+        len_model_output = len(pred.variables)
         loss_per_variable = self.loss(
             pred_filtered,
             target_filtered,
             squash=squash,
             **loss_kwargs,
         )
+        loss = loss_per_variable.new_zeros(len_model_output)
         loss[pred_indices] = loss_per_variable
         return loss

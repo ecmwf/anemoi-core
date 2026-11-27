@@ -1,0 +1,19 @@
+# Settings shared by the transport training configs (transport.yaml for one dataset, multi_transport.yaml for
+# several). It is a fragment: use it through those files, not as training=transport_settings.
+precision: bf16-mixed
+
+gradient_clip:
+  val: 1.
+  algorithm: norm
+
+optimization:
+  optimizer:
+    _target_: torch.optim.AdamW
+    weight_decay: 0.1
+    betas: [0.9, 0.95]
+    eps: 1e-7
+
+method:
+  _target_: anemoi.training.train.methods.TransportTraining
+
+max_steps: 1000000

@@ -45,7 +45,12 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DictConfig, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
+        if not isinstance(dataset, str):
+            # Drop unset options, as the training data readers do,
+            # to prevent open_dataset from rejecting options set to None (e.g. ``frequency: None`` for trajectories).
+            options = OmegaConf.to_container(dataset) if isinstance(dataset, DictConfig) else dict(dataset)
+            dataset = {key: value for key, value in options.items() if value is not None}
+        self.dataset = dataset
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 

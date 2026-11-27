@@ -152,6 +152,9 @@ trace.txt
 *.prof
 prof/
 *.gz
+outputs/*
+scratch/*
+plans/*
 
 # Azure tests
 __blobstorage__/
