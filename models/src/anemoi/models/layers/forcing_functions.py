@@ -21,9 +21,9 @@ import operator
 from typing import TYPE_CHECKING
 
 import torch
-from anemoi.utils.dates import as_timedelta
 
 from anemoi.models.preprocessing.normalization import normalization_coefficients
+from anemoi.utils.dates import as_timedelta
 
 if TYPE_CHECKING:
     from anemoi.models.data import Source
@@ -43,7 +43,11 @@ class ForcingCondition:
     """``forcing <operator> threshold`` for a forcing of the dataset, e.g. ``lsm < 0.5``, in physical units."""
 
     def __init__(
-        self, name: str, operator: str = "le", threshold: float = 0.0, normalizer: str = "none"  # noqa: A002
+        self,
+        name: str,
+        operator: str = "le",
+        threshold: float = 0.0,
+        normalizer: str = "none",  # noqa: A002
     ) -> None:
         if operator not in OPERATORS:
             msg = f"Unknown operator {operator!r}, expected one of {list(OPERATORS)}."
