@@ -20,12 +20,18 @@ class Timedeltas:
     scaled units, followed by sine/cosine pairs for each configured period.
     """
 
+    name: str = "timedeltas"
+
     def __init__(
         self,
         scale_seconds: float = 3600.0,
         periods: list[float] | None = None,
+        name: str | None = None,
         dtype: str = "float32",
     ) -> None:
+        if name is not None:
+            self.name = name
+
         if not math.isfinite(scale_seconds) or scale_seconds <= 0:
             raise ValueError(f"scale_seconds must be positive and finite, got {scale_seconds}.")
 

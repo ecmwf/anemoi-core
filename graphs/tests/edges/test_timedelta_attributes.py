@@ -124,3 +124,8 @@ def test_timedeltas_edge_schema_validation():
 def test_timedeltas_edge_schema_rejects_invalid_settings(config):
     with pytest.raises(ValidationError):
         TypeAdapter(EdgeAttributeSchema).validate_python(config)
+
+
+def test_timedeltas_name_defaults_and_override():
+    assert Timedeltas(node_axis="source").name == "timedeltas"
+    assert Timedeltas(node_axis="source", name="src_dt").name == "src_dt"

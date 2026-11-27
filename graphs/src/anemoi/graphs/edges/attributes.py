@@ -349,12 +349,14 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 class Timedeltas(BaseEdgeAttributeBuilder):
     """Propagate scaled runtime timedeltas from one endpoint to each edge."""
 
+    name: str = "timedeltas"
     node_attr_name = "timedeltas"
 
     def __init__(
         self,
         node_axis: Literal["source", "target"],
         scale_seconds: float = 3600.0,
+        name: str | None = None,
         dtype: str = "float32",
     ) -> None:
         if node_axis not in ("source", "target"):
@@ -369,16 +371,7 @@ class Timedeltas(BaseEdgeAttributeBuilder):
         self.node_axis = node_axis
         self.scale_seconds = float(scale_seconds)
         self.torch_dtype = torch_dtype
-        super().__init__(norm=None, dtype=dtype)
-
-    @property
-    def ndim(self) -> int:
-        """Number of output features produced per edge.
-
-        Used by the dynamic graph providers to size the edge feature dimension at construction time (before any edges
-        exist).
-        """
-        return 1
+        super().__init__(name=name, norm=None, dtype=dtype)
 
     def _get_endpoint_values(self, nodes: NodeStorage) -> torch.Tensor:
         if self.node_attr_name not in nodes:
