@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .builders.delaunay import SphericalDelaunayEdges
 from .attributes import Timedeltas
+from .builders.delaunay import SphericalDelaunayEdges
 from .builders.euclidean.cutoff import CutOffEdges
 from .builders.euclidean.cutoff import ReversedCutOffEdges
 from .builders.euclidean.knn import KNNEdges

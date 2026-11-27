@@ -62,22 +62,22 @@ class KMeansClusterBuilder:
             Latitude and longitude of the reference nodes in radians, of shape
             (N_ref, 2), and their weights of shape (N_ref,), if requested.
         """
-        assert (
-            self.reference_node_name in graph.node_types
-        ), f'Reference node "{self.reference_node_name}" not found in the graph.'
+        assert self.reference_node_name in graph.node_types, (
+            f'Reference node "{self.reference_node_name}" not found in the graph.'
+        )
 
         coords_rad = graph[self.reference_node_name].x
         if self.mask_attr_name is not None:
-            assert (
-                self.mask_attr_name in graph[self.reference_node_name].node_attrs()
-            ), f'Mask attribute "{self.mask_attr_name}" not found in the reference nodes.'
+            assert self.mask_attr_name in graph[self.reference_node_name].node_attrs(), (
+                f'Mask attribute "{self.mask_attr_name}" not found in the reference nodes.'
+            )
             mask = graph[self.reference_node_name][self.mask_attr_name].squeeze()
             coords_rad = coords_rad[mask]
 
         if self.node_weight_attribute_name is not None:
-            assert (
-                self.node_weight_attribute_name in graph[self.reference_node_name].node_attrs()
-            ), f'Node weight attribute "{self.node_weight_attribute_name}" not found in the reference nodes.'
+            assert self.node_weight_attribute_name in graph[self.reference_node_name].node_attrs(), (
+                f'Node weight attribute "{self.node_weight_attribute_name}" not found in the reference nodes.'
+            )
             weights = graph[self.reference_node_name][self.node_weight_attribute_name].squeeze()
             if self.mask_attr_name is not None:
                 weights = weights[mask]
