@@ -470,7 +470,7 @@ def test_build_networks_creates_one_mapper_pair_and_two_processors_per_level(thr
     """
     model = three_level_interface.model
     assert isinstance(model, AnemoiModelEncProcDecHierarchical)
-    assert model.num_hidden == 3
+    assert len(model.hidden_names) == 3
     assert model.level_process is True
 
     lower_levels = THREE_LEVELS[:-1]
@@ -546,7 +546,8 @@ def test_build_networks_wires_each_provider_to_its_own_edges(three_level_interfa
         assert_built_from(model.downscale_graph_providers[src], dst, src)
         assert_built_from(model.down_level_processor_graph_providers[src], src, src)
         assert_built_from(model.up_level_processor_graph_providers[src], src, src)
-    assert_built_from(model.processor_graph_provider, "hidden_3", "hidden_3")
+    assert list(model.processor_graph_provider) == ["hidden_3"]
+    assert_built_from(model.processor_graph_provider["hidden_3"], "hidden_3", "hidden_3")
     assert_built_from(model.encoder_graph_provider[GRIDDED], GRIDDED, "hidden_1")
     assert_built_from(model.decoder_graph_provider[GRIDDED], "hidden_1", GRIDDED)
 
@@ -556,7 +557,7 @@ def test_build_networks_without_level_processing_has_no_level_processors(two_lev
     for the per-level ones.
     """
     model = two_level_interface.model
-    assert model.num_hidden == 2
+    assert len(model.hidden_names) == 2
     assert model.level_process is False
     for name in (
         "down_level_processor",

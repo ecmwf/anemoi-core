@@ -20,9 +20,9 @@ import anemoi.models.preprocessing.spatial as spatial_module
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
-from anemoi.models.models.base import hidden_node_names
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import COORDS_DIM
+from anemoi.models.utils.graphs import hidden_node_names
 from anemoi.models.utils.graphs import split_graph_config
 from tests.batch_builders import build_batch
 
@@ -216,6 +216,11 @@ def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(as_omeg
 
     assert model.dataset2hidden == {"a": "hidden_1", "b": "hidden_1"}
     assert model.hidden_names == levels
+
+
+def test_hierarchical_routing_rejects_a_repeated_level() -> None:
+    with pytest.raises(ValueError, match=r"\['hidden_1'\] more than once"):
+        _route_hidden_nodes(["hidden_1", "hidden_2", "hidden_1"])
 
 
 def test_hidden_node_routing_rejects_mapping_missing_a_dataset() -> None:
