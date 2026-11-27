@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.10](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.9...graphs-0.9.10) (2026-11-27)
+
+
+### Features
+
+* **models, training:** Support for observations, `richer-batch` ([#1435](https://github.com/ecmwf/anemoi-core/issues/1435)) ([461ffc3](https://github.com/ecmwf/anemoi-core/commit/461ffc3dd0f2ad14757bae0848feab2518d274a1))
+
 ## [0.9.9](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.7...graphs-0.9.9) (2026-11-03)
 
 
