@@ -114,12 +114,9 @@ This environment variable controls the number of chunks used in the
  Bounding
 **********
 
-Output boundings are applied to the predictions of each dataset, in the
-order of the ``bounding`` config. ``ForcingMaskBounding`` sets variables
-to a fill value where a condition on the output-time forcings holds. Its
-``mask`` is a forcing name or a function of the forcings. For example,
-to zero accumulated radiation where the sun was down for the whole
-accumulation period (the model's output timestep):
+Output boundings are applied to the predictions of each dataset, in the order of the ``bounding`` config.
+``ForcingMaskBounding`` sets variables to a fill value where a mask computed from the output-time forcings is
+true, e.g. to zero accumulated radiation where the sun was down for the whole accumulation period:
 
 .. code:: yaml
 
@@ -128,11 +125,8 @@ accumulation period (the model's output timestep):
        variables: [ssr, ssrd, fdir]
        normalizer: [mean-std, mean-std, mean-std]
        mask:
-         _target_: anemoi.models.layers.forcing_functions.MaxInsolationOverWindow
-         window: 6h
-
-It needs the target forcings, so ``cos/sin_julian_day`` and
-``cos/sin_local_time`` must be forcings of the dataset for this function.
+         _target_: anemoi.models.layers.forcing_functions.NoSunlightInWindow
+         window: 6h # the model's output timestep
 
 .. automodule:: anemoi.models.layers.bounding
    :members:

@@ -92,30 +92,17 @@ class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
 
 class ForcingMaskBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.ForcingMaskBounding"] = Field(..., alias="_target_")
-    "Bounding setting variables to a fill value where a condition on the output-time forcings holds."
     variables: list[str]
-    "Variables to overwrite."
     normalizer: list[str]
     "Normalisation method of each variable, to normalise the fill value."
-    mask: Union[str, dict]
-    "Forcing name, or a config with a _target_ computing a quantity from the target forcings."
-    operator: Literal["lt", "le", "gt", "ge"] = "le"
-    "Comparison of the mask with the threshold."
-    threshold: float = 0.0
-    "Threshold in physical units."
+    mask: dict
+    "Config (with a _target_) of a callable returning a boolean mask from the target forcings."
     fill_value: float = 0.0
     "Fill value in physical units."
-    mask_normalizer: str = "none"
-    "Normalisation method of the forcing when mask is a forcing name."
 
     @model_validator(mode="after")
-    def check_normalizers_and_mask(self) -> ForcingMaskBoundingSchema:
-        assert len(self.normalizer) == len(self.variables), (
-            f"{self.__class__} requires one normalizer per variable ({len(self.normalizer)} for {len(self.variables)})."
-        )
-        assert isinstance(self.mask, str) or "_target_" in self.mask, (
-            f"{self.__class__}: mask must be a forcing name or a config with a _target_."
-        )
+    def check_normalizers_match_variables(self) -> ForcingMaskBoundingSchema:
+        assert len(self.normalizer) == len(self.variables), f"{self.__class__} needs one normalizer per variable."
         return self
 
 
