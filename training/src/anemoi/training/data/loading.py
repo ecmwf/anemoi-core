@@ -464,7 +464,7 @@ class GroupedDatasetLoadingPolicy(MultiDomainLoadingPolicy):
 
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
