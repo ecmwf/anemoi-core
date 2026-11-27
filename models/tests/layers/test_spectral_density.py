@@ -59,7 +59,10 @@ def test_spectral_density_contract(transform: str) -> None:
     psd_a = t.power_spectral_density(a)
     psd_b = t.power_spectral_density(b)
 
-    total = torch.real(a * torch.conj(a)).flatten(-3, -2).sum(dim=-2)
+    # Each stored mode counts as often as the transform's weight_modes says: once for the 2D
+    # transforms, twice for SHT modes with m > 0 (standing in for -m), never for m > l.
+    power_per_mode = torch.real(a * torch.conj(a)).flatten(-3, -2)
+    total = t.weight_modes(power_per_mode, mode_dim=-2).sum(dim=-2)
     torch.testing.assert_close(psd_a.sum(dim=-2), total)
     torch.testing.assert_close(t.cross_spectral_density(a, a), psd_a)
 

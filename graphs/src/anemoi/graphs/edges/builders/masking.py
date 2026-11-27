@@ -13,7 +13,6 @@ from collections.abc import Callable
 
 import numpy as np
 import torch
-from scipy.sparse import coo_matrix
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
@@ -78,37 +77,6 @@ class NodeMaskingMixin:
     def get_source_unmasking_mapping(self, nodes: NodeStorage) -> Callable:
         """Get the unmasking mapping for the source nodes."""
         return NodeMaskingMixin._get_unmasking_mapping(mask=nodes[self.source_mask_attr_name])
-
-    def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
-        """Undo masking for adjacency matrix, remapping indices to original node indices.
-
-        Arguments
-        ---------
-        adj_matrix
-            Adjacency matrix
-        source_nodes : NodeStorage
-            Source node storage.
-        target_nodes : NodeStorage
-            Target node storage.
-
-        Returns
-        -------
-        np.ndarray
-            Remapped adj_matrix with original node indices.
-        """
-        if self.target_mask_attr_name is not None:
-            target_node_mapping = self.get_target_unmasking_mapping(target_nodes)
-            adj_matrix.row = target_node_mapping(adj_matrix.row)
-
-        if self.source_mask_attr_name is not None:
-            source_node_mapping = self.get_source_unmasking_mapping(source_nodes)
-            adj_matrix.col = source_node_mapping(adj_matrix.col)
-
-        if self.source_mask_attr_name is not None or self.target_mask_attr_name is not None:
-            true_shape = target_nodes.x.shape[0], source_nodes.x.shape[0]
-            adj_matrix = coo_matrix((adj_matrix.data, (adj_matrix.row, adj_matrix.col)), shape=true_shape)
-
-        return adj_matrix
 
     def undo_masking_edge_index(
         self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage

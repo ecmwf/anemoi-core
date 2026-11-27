@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 
 from anemoi.models.schemas.aggregator import AggregatorSchema
 from anemoi.models.schemas.aggregator import ConcatAggregatorSchema
+from anemoi.models.schemas.aggregator import GatedFusionAggregatorSchema
 from anemoi.models.schemas.aggregator import MeanAggregatorSchema
 from anemoi.models.schemas.aggregator import PointwiseCrossAttentionAggregatorSchema
 from anemoi.models.schemas.aggregator import SumAggregatorSchema
@@ -30,6 +31,19 @@ from anemoi.models.schemas.aggregator import SumAggregatorSchema
                 "num_heads": 4,
             },
             PointwiseCrossAttentionAggregatorSchema,
+        ),
+        ({"_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator"}, GatedFusionAggregatorSchema),
+        (
+            {
+                "_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator",
+                "principal_source": "era5",
+                "value_init_scale": 0.0,
+            },
+            GatedFusionAggregatorSchema,
+        ),
+        (
+            {"_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator", "value_init_scale": 1e-3},
+            GatedFusionAggregatorSchema,
         ),
     ],
 )

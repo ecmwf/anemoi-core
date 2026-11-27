@@ -236,3 +236,127 @@ class PointwiseCrossAttentionAggregator(BaseLatentAggregator):
         query = self.hidden_norm(residual)
         update = self.attention(query, keys, values)
         return residual + update
+
+
+class GatedLatentFusion(nn.Module):
+    """Gated residual block that folds an encoder latent into a running latent.
+
+    Both tensors are node-aligned, so the block works pointwise: the two
+    layer-normalised latents are concatenated and fed to a sigmoid gate and a
+    two-layer MLP. The result is added to the running latent as a gated
+    residual.
+
+    Weights are shared across nodes; the parameter count depends only on
+    ``hidden_dim`` and ``input_dim``.
+
+    Parameters
+    ----------
+    hidden_dim : int
+        Channels of the running latent and of the output.
+    input_dim : int, optional
+        Channels of the encoder latent. Defaults to ``hidden_dim``.
+    value_init_scale : float, optional
+        Scale the initial weights of the value MLP's output layer and zero its
+        bias. ``0.0`` starts the block as an exact identity; the encoder then
+        gets no gradient at first.
+    """
+
+    def __init__(self, hidden_dim: int, input_dim: int | None = None, value_init_scale: float | None = None) -> None:
+        super().__init__()
+        input_dim = hidden_dim if input_dim is None else input_dim
+        if value_init_scale is not None and value_init_scale < 0:
+            raise ValueError(f"value_init_scale must be non-negative, got {value_init_scale}.")
+        # Separate norms: the running latent and a fresh encoder output have
+        # different scales and distributions.
+        self.norm_latent = nn.LayerNorm(hidden_dim)
+        self.norm_input = nn.LayerNorm(input_dim)
+        self.to_gate = nn.Sequential(
+            nn.Linear(hidden_dim + input_dim, hidden_dim),
+            nn.Sigmoid(),
+        )
+        self.to_value = nn.Sequential(
+            nn.Linear(hidden_dim + input_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        if value_init_scale is not None:
+            with torch.no_grad():
+                self.to_value[-1].weight.mul_(value_init_scale)
+                self.to_value[-1].bias.zero_()
+
+    def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
+        """Fold ``encoder_output`` (nodes, input_dim) into ``latent`` (nodes, hidden_dim)."""
+        combined = torch.cat([self.norm_latent(latent), self.norm_input(encoder_output)], dim=-1)
+        gate = self.to_gate(combined)
+        value = self.to_value(combined)
+        return latent + gate * value
+
+
+class GatedFusionAggregator(BaseLatentAggregator):
+    """Fold auxiliary latents into the principal latent, one gated block per source.
+
+    Auxiliary sources may be absent at call time and may differ in width; the
+    output width is the principal source's. The merge order is shuffled in
+    training and follows the configured order in eval.
+    """
+
+    def __init__(
+        self,
+        *,
+        input_channels: int,
+        source_channels: Mapping[str, int],
+        principal_source: str | None = None,
+        value_init_scale: float | None = None,
+        gradient_checkpointing: bool = False,
+    ) -> None:
+        super().__init__(
+            input_channels=input_channels,
+            source_channels=source_channels,
+            gradient_checkpointing=gradient_checkpointing,
+        )
+        self.principal_source = principal_source if principal_source is not None else self.source_names[0]
+        if self.principal_source not in self.source_channels:
+            raise ValueError(
+                f"{self.__class__.__name__}: principal_source {self.principal_source!r} "
+                f"is not one of the latent sources {self.source_names}.",
+            )
+        self._hidden_dim = self.source_channels[self.principal_source]
+
+        self.fusion = nn.ModuleDict(
+            {
+                name: GatedLatentFusion(
+                    hidden_dim=self._hidden_dim,
+                    input_dim=self.source_channels[name],
+                    value_init_scale=value_init_scale,
+                )
+                for name in self.source_names
+                if name != self.principal_source
+            },
+        )
+
+    @property
+    def hidden_dim(self) -> int:
+        return self._hidden_dim
+
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        latents = dict(zip(source_names, source_latents, strict=True))
+        if self.principal_source not in latents:
+            raise ValueError(
+                f"{self.__class__.__name__} requires the principal source {self.principal_source!r}; "
+                f"got {sorted(latents)}.",
+            )
+
+        x_latent = latents[self.principal_source]
+        remaining = [name for name in source_names if name != self.principal_source]
+        if self.training:
+            # torch RNG, not Python's ``random``: checkpointing restores the torch RNG state for the
+            # recompute in backward, so the merge order matches the forward pass.
+            remaining = [remaining[i] for i in torch.randperm(len(remaining)).tolist()]
+        for name in remaining:
+            x_latent = self.fusion[name](x_latent, latents[name])
+        return x_latent
