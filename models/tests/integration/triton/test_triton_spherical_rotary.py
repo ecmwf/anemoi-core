@@ -204,3 +204,23 @@ def test_neighbourhood_cross_attention_with_either_backend():
     )
     shard = BipartiteGraphShardInfo(src_nodes=[2 * data.num_points], dst_nodes=[2 * hidden.num_points])
     _assert_layers_agree(layers, inputs, shard, 2)
+
+
+@pytest.mark.slow
+def test_offsets_past_int32():
+    """Points * point stride more than 2**31: the kernel must use 64-bit offsets.
+
+    One head of 64 channels is read from rows of 1024 channels, as after the
+    "(batch grid) (heads vars) -> batch heads grid vars" rearrange of a wide model on a large grid.
+    """
+    num_points, width, head_dim = 2_200_000, 1024, 64
+    assert num_points * width > 2**31
+    if torch.cuda.get_device_properties(0).total_memory < 16 * 2**30:
+        pytest.skip("Needs a GPU with 16 GiB of memory.")
+    rows = torch.randn(num_points, width, device="cuda", dtype=torch.bfloat16)
+    x = rows[:, :head_dim]
+    cos, sin = tables(num_points, head_dim)
+    out = spherical_rotary(x, cos, sin)
+    for points in (slice(0, 1000), slice(num_points - 1000, num_points)):
+        expected = apply_rotary(x[points], cos[points], sin[points]).to(x.dtype)
+        torch.testing.assert_close(out[points], expected, **TOLERANCE[torch.bfloat16])
