@@ -407,12 +407,12 @@ class Timedeltas(BaseEdgeAttributeBuilder):
             )
         return timedeltas.to(device=self.device, dtype=self.torch_dtype)
 
-    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+    def _subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_axis == "source":
             return self._get_endpoint_values(source_nodes), None
         return None, self._get_endpoint_values(target_nodes)
 
-    def compute(self, x_i: torch.Tensor | None, x_j: torch.Tensor | None) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor | None, x_j: torch.Tensor | None) -> torch.Tensor:
         timedeltas = x_j if self.node_axis == "source" else x_i
         if timedeltas is None:
             raise ValueError(f"Timedeltas could not read the selected {self.node_axis} endpoint values.")
