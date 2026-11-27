@@ -256,7 +256,7 @@ class TestCollate:
 
     def test_mixed_sharded_and_unsharded_samples_are_rejected(self) -> None:
         sharded = tabular_sample(shard_sizes=[[1, 1], [1, 1]])
-        with pytest.raises(ValueError, match="mixes sharded and unsharded"):
+        with pytest.raises(ValueError, match="mixes samples with and without .shard_sizes."):
             Batch.collate([{"obs": sharded}, {"obs": tabular_sample()}])
 
     @pytest.mark.parametrize(

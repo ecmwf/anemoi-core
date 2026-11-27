@@ -22,6 +22,8 @@ from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
+from anemoi.models.data.sources.base import time_tree_lines
+from anemoi.models.data.time import select_time_offsets
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.noise import draw_noise
@@ -83,6 +85,8 @@ class GriddedSource(Source):
                     f"but {len(self.variables)} names."
                 )
                 raise ValueError(msg)
+
+        self._check_time_fields()
 
     @property
     def coordinates_are_static(self) -> bool:
@@ -342,11 +346,8 @@ class GriddedSource(Source):
         Parameters
         ----------
         indices : int, slice, or sequence of int
-            Positions along the logical *time* axis. For gridded datasets
-            this indexes ``layout.time`` directly. For sparse observation
-            datasets it picks the corresponding boundary slices from
-            ``boundaries`` (per sample), updating data, coordinates,
-            timedeltas and the boundary list consistently.
+            Positions along ``layout.time``. The ``time_offsets`` are indexed
+            alongside, still measured from the same reference time.
 
         Returns
         -------
@@ -361,7 +362,7 @@ class GriddedSource(Source):
         idx_list = _index_list(indices, self.values.shape[self.layout.time])
         idx = torch.as_tensor(idx_list, dtype=torch.long, device=self.values.device)
         new_data = self.values.index_select(self.layout.time, idx)
-        return self.clone(values=new_data)
+        return self.clone(values=new_data, time_offsets=select_time_offsets(self.time_offsets, idx_list))
 
     def tree(self, prefix: str = "") -> Tree:
         """Return a tree representation of the gridded source.
@@ -387,6 +388,9 @@ class GriddedSource(Source):
 
         if self.shard_sizes is not None:
             tree.add(f"Shard sizes: {self.shard_sizes}")
+
+        for line in time_tree_lines(self):
+            tree.add(line)
 
         return tree
 

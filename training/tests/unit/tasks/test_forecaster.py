@@ -896,3 +896,71 @@ def test_offset_convert_and_validate_returns_sorted_timedeltas(
     assert converted_inputs == expected_inputs
     assert converted_outputs == expected_outputs
     assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
+
+
+# ── Forecaster: time offsets and reference dates through the rollout ─────────
+
+_HOUR = datetime.timedelta(hours=1)
+_REF = datetime.datetime.fromisoformat("2024-01-01T12:00")
+
+
+def _with_times(batch: Batch, offsets: tuple[datetime.timedelta, ...], reference: datetime.datetime = _REF) -> Batch:
+    """Return ``batch`` with every source's times set to ``reference + offsets``."""
+    return batch.with_sources(
+        {name: source.clone(time_offsets=offsets, reference_date=[reference]) for name, source in batch.items()},
+    )
+
+
+def test_measure_targets_from_step_moves_the_reference_by_the_rollout() -> None:
+    """At rollout step k, target times are measured from the forecast time ``k`` shifts later."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    targets = _with_times(_obs_batch([(_obs_window(2, p=[0.0], f=0.0), 0.0)]), (12 * _HOUR,))
+
+    measured = task.measure_targets_from_step(targets, rollout_step=2)["obs"]
+
+    assert measured.time_offsets == (0 * _HOUR,)
+    assert measured.reference_date == [_REF + 12 * _HOUR]
+    torch.testing.assert_close(measured.timedeltas[0], torch.full((2,), -2 * SIX_HOURS))
+
+
+def test_advance_input_keeps_input_offsets_and_moves_obs_reference() -> None:
+    """After a step, the obs inputs sit at the input offsets from a reference one shift later."""
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    x = _with_times(
+        _obs_batch([(_obs_window(3, p=[-6.0], f=0.0), -6.0), (_obs_window(4, p=[0.0], f=0.0), 0.0)]),
+        (-6 * _HOUR, 0 * _HOUR),
+    )
+    truth = _with_times(_obs_batch([(_obs_window(5, p=[7.0], f=8.0), 6.0)]), (6 * _HOUR,))
+    y_pred = _with_times(_obs_batch([(_obs_window(5, p=[1.0]), 6.0)], variables=["p"]), (6 * _HOUR,))
+
+    advanced = task.advance_input(x, y_pred, truth, data_indices=_obs_data_indices())["obs"]
+
+    assert advanced.time_offsets == (-6 * _HOUR, 0 * _HOUR)
+    assert advanced.reference_date == [_REF + 6 * _HOUR]
+
+
+def test_advance_input_keeps_input_offsets_and_moves_gridded_reference() -> None:
+    """After a step, the gridded inputs sit at the input offsets from a reference one shift later."""
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    batch = build_batch(
+        values={"forecast": torch.arange(1.0, 3.0).reshape(1, 2, 1, 1, 1)},
+        coordinates={"forecast": torch.zeros(1, 2)},
+        layouts={"forecast": layout},
+        variables={"forecast": ["A"]},
+        statistics={"forecast": {}},
+    )
+    x = _with_times(batch, (-6 * _HOUR, 0 * _HOUR))
+    output = _with_times(batch.with_data({"forecast": torch.full((1, 1, 1, 1, 1), 3.0)}), (6 * _HOUR,))
+
+    advanced = task.advance_input(
+        x,
+        output,
+        output,
+        data_indices={"forecast": _make_minimal_index_collection({"A": 0})},
+        output_mask={"forecast": NoOutputMask()},
+    )["forecast"]
+
+    torch.testing.assert_close(advanced.values.flatten(), torch.tensor([2.0, 3.0]))
+    assert advanced.time_offsets == (-6 * _HOUR, 0 * _HOUR)
+    assert advanced.reference_date == [_REF + 6 * _HOUR]

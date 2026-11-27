@@ -118,18 +118,6 @@ class TabularDataReader(BaseAnemoiReader):
             shard_sizes=shard_sizes,
         )
 
-    def measure_from_reference(self, sample: TabularSample, reference: int, positions: TimeIndices) -> TabularSample:
-        """Return ``sample`` with its timedeltas measured from the reference time, not each window's date.
-
-        Each window's timedeltas are offsets from that window's own date. Adding the window's
-        offset from the reference date puts all windows on one time axis, so a point in an
-        earlier window has a more negative timedelta than one in a later window.
-        """
-        dates = np.asarray(self.dates)
-        window_dates = dates[np.atleast_1d(np.arange(len(dates))[positions])]
-        window_offsets = (window_dates - dates[reference]) / np.timedelta64(1, "s")
-        return sample.with_time_offsets(window_offsets.tolist())
-
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
         if hasattr(self.data, "window"):

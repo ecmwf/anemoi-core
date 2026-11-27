@@ -310,6 +310,10 @@ class AnemoiModelInterface(torch.nn.Module):
                 "layout": layout.axis_names,
                 **tabular_payload,
             }
+            if sample.time_offsets is not None:
+                payload["time_offsets"] = sample.time_offsets
+            if sample.reference_date is not None:
+                payload["reference_date"] = sample.reference_date[0]
             unwrapped[dataset_name] = payload
 
         return unwrapped
@@ -336,6 +340,8 @@ class AnemoiModelInterface(torch.nn.Module):
             carry ``timedeltas`` and ``boundaries``. The ``layout`` names exactly the axes
             of ``values``, in any order; it may leave out the ``ensemble`` axis, which then
             has one member. A gridded ``time`` axis must hold the model's input steps.
+            Optional ``time_offsets`` (one ``timedelta`` per step) and ``reference_date``
+            describe the payload's times and are passed on to the outputs that carry them.
         target_template : Optional[dict[str, dict]]
             Output geometry, one payload per dataset to decode; required despite the
             default. Like an input payload without ``values``, naming the variables to decode.

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 from collections import defaultdict
 from collections.abc import Callable
@@ -268,6 +269,15 @@ class Batch:
                 for name, source in self.sources.items()
             },
         )
+
+    def shift_time_reference(self, delta: datetime.timedelta) -> "Batch":
+        """Return the batch with every dataset's times measured from a reference moved on by ``delta``.
+
+        See :meth:`Source.shift_time_reference`.
+        """
+        if not delta:
+            return self
+        return Batch(sources={name: source.shift_time_reference(delta) for name, source in self.sources.items()})
 
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.

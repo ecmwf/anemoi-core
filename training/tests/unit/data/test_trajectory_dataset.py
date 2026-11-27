@@ -252,3 +252,16 @@ class TestCreateDatasetWithTrajectory:
             reader = create_reader(config)
 
         assert type(reader) is GriddedDataReader
+
+
+class TestTrajectoryDataReaderTimes:
+    def test_measure_from_reference_uses_base_date_plus_step(self) -> None:
+        """The reference date is the valid time ``base_date + step`` of the reference step."""
+        reader = _make_reader(num_base_dates=4, steps=6)
+        sample = reader.get_sample(2, [1, 2, 4])
+
+        measured = reader.measure_from_reference(sample, sequence=2, reference=2, positions=[1, 2, 4])
+
+        hour = datetime.timedelta(hours=1)
+        assert measured.reference_date == datetime.datetime.fromisoformat("2020-01-03T12:00")
+        assert measured.time_offsets == (-6 * hour, 0 * hour, 12 * hour)
