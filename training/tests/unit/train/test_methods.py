@@ -42,10 +42,10 @@ from anemoi.models.transport import EdmSettings
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
 from anemoi.models.transport.objectives import FlowMatchingModelObjective
 from anemoi.training.losses import CombinedLoss
+from anemoi.training.losses import LossScaler
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
-from anemoi.training.losses import LossScaler
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
@@ -677,7 +677,6 @@ def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
         "grid_dim": -2,
         "grid_shard_sizes": None,
     }
-
 
 
 # ── BaseTrainingModule: loss gradient scaling ─────────────────────────────────

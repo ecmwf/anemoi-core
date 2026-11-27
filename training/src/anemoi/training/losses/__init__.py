@@ -18,11 +18,11 @@ from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
-from .scaler_tensor import LossScaler
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
+from .scaler_tensor import LossScaler
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
