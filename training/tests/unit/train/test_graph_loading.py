@@ -151,11 +151,7 @@ def test_graph_build_drops_schema_keys_from_node_builder() -> None:
 
 
 @pytest.mark.parametrize(("rank", "expect_written"), [(0, True), (1, False)])
-def test_graph_build_without_process_group_writes_graph_only_on_rank_zero(
-    tmp_path: Path,
-    rank: int,
-    expect_written: bool,
-) -> None:
+def test_graph_build_writes_graph_only_on_rank_zero(tmp_path: Path, rank: int, expect_written: bool) -> None:
     graph_path = tmp_path / "graph.pt"
     trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
     trainer.config.system.input.graph = str(graph_path)
@@ -167,40 +163,39 @@ def test_graph_build_without_process_group_writes_graph_only_on_rank_zero(
     ):
         trainer.graph_data
 
+    mock_creator.create.assert_called_once()
     assert mock_creator.create.call_args.kwargs["save_path"] == (graph_path if expect_written else None)
 
 
-def test_graph_build_with_process_group_is_broadcast_from_rank_zero(tmp_path: Path) -> None:
+@pytest.mark.parametrize("rank", [0, 1])
+def test_graph_without_overwrite_is_loaded_from_file_on_every_rank(tmp_path: Path, rank: int) -> None:
+    graph = HeteroData()
+    graph[DEFAULT_DATASET_NAME].num_nodes = 3
     graph_path = tmp_path / "graph.pt"
+    torch.save(graph, graph_path)
     trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.graph.overwrite = False
     trainer.config.system.input.graph = str(graph_path)
-    mock_creator = MagicMock()
 
     with (
-        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator),
-        patch("torch.distributed.is_initialized", return_value=True),
-        patch("anemoi.training.train.train.broadcast_from_rank_zero", side_effect=lambda make: make()) as broadcast,
+        patch("anemoi.training.train.train.GraphCreator") as mock_creator_cls,
+        patch("anemoi.training.train.train.rank_zero_only.rank", rank),
+    ):
+        loaded_graph = trainer.graph_data
+
+    mock_creator_cls.assert_not_called()
+    assert loaded_graph[DEFAULT_DATASET_NAME].num_nodes == 3
+
+
+def test_graph_without_overwrite_raises_when_file_is_missing(tmp_path: Path) -> None:
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.graph.overwrite = False
+    trainer.config.system.input.graph = str(tmp_path / "missing.pt")
+
+    with (
+        patch("anemoi.training.train.train.GraphCreator") as mock_creator_cls,
+        pytest.raises(FileNotFoundError, match="Graph file not found"),
     ):
         trainer.graph_data
 
-    broadcast.assert_called_once()
-    assert mock_creator.create.call_args.kwargs["save_path"] == graph_path
-
-
-def test_graph_build_on_all_ranks_writes_graph_on_every_rank(tmp_path: Path) -> None:
-    graph_path = tmp_path / "graph.pt"
-    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
-    trainer.config.system.input.graph = str(graph_path)
-    trainer.config.graph.build_graph_on_all_ranks = True
-    mock_creator = MagicMock()
-
-    with (
-        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator),
-        patch("anemoi.training.train.train.rank_zero_only.rank", 1),
-        patch("torch.distributed.is_initialized", return_value=True),
-        patch("anemoi.training.train.train.broadcast_from_rank_zero") as broadcast,
-    ):
-        trainer.graph_data
-
-    broadcast.assert_not_called()
-    assert mock_creator.create.call_args.kwargs["save_path"] == graph_path
+    mock_creator_cls.assert_not_called()

@@ -7,28 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
-from datetime import timedelta
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 from unittest.mock import PropertyMock
 
 import pytest
-import torch.distributed as dist
-import torch.multiprocessing as mp
 from pytest_mock import MockFixture
-from pytorch_lightning.plugins.environments import LightningEnvironment
-from pytorch_lightning.plugins.environments import SLURMEnvironment
-from pytorch_lightning.strategies import DDPStrategy
-from pytorch_lightning.strategies import SingleDeviceStrategy
 
 from anemoi.training.distributed.strategy import BaseDDPStrategy
 from anemoi.training.distributed.strategy import DDPEnsGroupStrategy
 from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.distributed.strategy import broadcast_from_rank_zero
 from anemoi.training.distributed.strategy import seed_rnd
-from anemoi.training.distributed.strategy import setup_process_group_early
 from anemoi.training.utils import seeding
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -111,53 +99,3 @@ def test_process_dataloader_passes_reader_group_info(mocker: MockFixture) -> Non
 
     # Global rank 7 is rank 3 of its model group, which is rank 1 of its reader group.
     dataloader.dataset.set_reader_group_info.assert_called_once_with(1, {"data": [5, 5]})
-
-
-@pytest.mark.parametrize(
-    ("strategy_spec", "environment_spec", "initialized", "expect_setup"),
-    [
-        (DDPStrategy, SLURMEnvironment, False, True),
-        (DDPStrategy, LightningEnvironment, False, False),
-        (DDPStrategy, SLURMEnvironment, True, False),
-        (SingleDeviceStrategy, None, False, False),
-    ],
-)
-def test_setup_process_group_early(
-    mocker: MockFixture,
-    strategy_spec: type,
-    environment_spec: type | None,
-    initialized: bool,
-    expect_setup: bool,
-) -> None:
-    strategy = MagicMock(spec=strategy_spec)
-    strategy.cluster_environment = MagicMock(spec=environment_spec) if environment_spec else None
-    mocker.patch("torch.distributed.is_initialized", return_value=initialized)
-
-    setup_process_group_early(strategy)
-
-    assert strategy.setup_environment.called == expect_setup
-
-
-def _broadcast_on_rank(rank: int, init_file: str) -> None:
-    dist.init_process_group(
-        "gloo",
-        init_method=f"file://{init_file}",
-        rank=rank,
-        world_size=2,
-        timeout=timedelta(seconds=60),
-    )
-    try:
-
-        def make() -> dict:
-            assert dist.get_rank() == 0, "only rank 0 calls make"
-            time.sleep(1)  # the other rank must wait for rank 0
-            return {"made_by": 0}
-
-        assert broadcast_from_rank_zero(make) == {"made_by": 0}
-    finally:
-        dist.destroy_process_group()
-
-
-@pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
-def test_broadcast_from_rank_zero(tmp_path: Path) -> None:
-    mp.spawn(_broadcast_on_rank, args=(str(tmp_path / "rendezvous"),), nprocs=2)

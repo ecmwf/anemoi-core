@@ -41,8 +41,6 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.distributed.strategy import broadcast_from_rank_zero
-from anemoi.training.distributed.strategy import setup_process_group_early
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -205,16 +203,12 @@ class AnemoiTrainer(ABC):
         graph_path = self.config.system.input.graph
         save_path = Path(graph_path) if graph_path else None
 
-        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
-        is_existing = (
-            graph_path is not None
-            and not graph_cfg.overwrite
-            and not getattr(graph_cfg, "nodes", None)
-            and not getattr(graph_cfg, "edges", None)
-        )
-        if is_existing:
+        # Without overwrite, each rank loads the saved graph. No rank writes it, thus no rank
+        # can read a graph file that another rank has not finished writing.
+        overwrite = graph_cfg.get("overwrite", False)
+        if save_path and not overwrite:
             if not save_path.exists():
-                msg = f"Existing graph file not found: {save_path}"
+                msg = f"Graph file not found: {save_path}. Set graph.overwrite=True to build and save the graph."
                 raise FileNotFoundError(msg)
             graph = load_graph_from_file(save_path)
             fused = uses_fused_dataset_graph(graph, dataset_names)
@@ -261,26 +255,10 @@ class AnemoiTrainer(ABC):
                 )
                 raise ValueError(msg)
 
-        if graph_cfg.get("build_graph_on_all_ranks", False):
-            return self._load_or_build_graph(graph_config, save_path, write=True)
-        if torch.distributed.is_initialized():
-            # Only rank 0 loads or builds the graph. The other ranks wait for it.
-            return broadcast_from_rank_zero(lambda: self._load_or_build_graph(graph_config, save_path, write=True))
-        # Without a process group, each rank gets the graph, but only global rank 0 writes it.
-        return self._load_or_build_graph(graph_config, save_path, write=rank_zero_only.rank == 0)
-
-    def _load_or_build_graph(self, graph_config: DictConfig, save_path: Path | None, write: bool) -> HeteroData:
-        """Load the graph from ``save_path`` if possible, else build it. Write a built graph only if ``write``."""
-        overwrite = self.config.graph.get("overwrite", False)
-        if save_path and save_path.exists() and not overwrite:
-            fused = uses_fused_dataset_graph(self.config.graph, self._dataset_names)
-            required = self._dataset_names if fused else [DEFAULT_DATASET_NAME]
-            graph = load_graph_from_file(save_path)
-            validate_loaded_graph(graph, required)
-            return graph
-
-        if not write:
-            # Rank 0 writes the graph, thus do not warn that this rank does not write it.
+        # Each rank builds the graph, but only global rank 0 writes it, because writes
+        # from many ranks to the same file can corrupt it.
+        if rank_zero_only.rank != 0:
+            # Do not warn that this rank does not write the graph.
             logging.getLogger("anemoi.graphs.create").setLevel(logging.ERROR)
             save_path = None
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
@@ -824,9 +802,6 @@ class AnemoiTrainer(ABC):
             enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-
-        # Start the process group before the model is built, so that only rank 0 builds the graph.
-        setup_process_group_early(trainer.strategy)
 
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 

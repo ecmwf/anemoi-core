@@ -5,7 +5,7 @@ system:
   input:
     dataset:  /ec/ai/project/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
     graph: ./graphtransformer-bm-graph.pt
-    #store locally so graph will be reused by non-zero processes
+    # rank 0 writes the graph here (graph.overwrite is True in base.yaml)
 
 dataloader:
   training:

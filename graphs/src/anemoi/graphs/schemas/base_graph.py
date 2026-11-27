@@ -51,8 +51,6 @@ class BaseGraphSchema(PydanticBaseModel):
     "List of edges schema."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
-    build_graph_on_all_ranks: bool = Field(default=False)
-    "In distributed training, if True, each rank builds the graph and writes it. If False, only rank 0 does."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 
