@@ -14,6 +14,7 @@ from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import BaseTrainingSchema
 from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import CombinedLossSchema
+from anemoi.training.schemas.training import LossGradientScalingSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
@@ -333,3 +334,29 @@ def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
     """A loading block without _target_ is rejected."""
     with pytest.raises(ValidationError):
         CheckpointPipelineSchema(loading={"strict": True})
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (False, {"enabled": False, "power": 1.0, "max_gain": None}),
+        (True, {"enabled": True, "power": 1.0, "max_gain": None}),
+        ({"enabled": True, "power": 0.5, "max_gain": 10.0}, {"enabled": True, "power": 0.5, "max_gain": 10.0}),
+    ],
+)
+def test_loss_gradient_scaling_accepts_bool_and_mapping(value: object, expected: dict) -> None:
+    """The legacy bool form of training.loss_gradient_scaling maps onto `enabled`."""
+    coerced = BaseTrainingSchema.coerce_loss_gradient_scaling(value)
+    assert LossGradientScalingSchema(**coerced).model_dump() == expected
+
+
+def test_loss_gradient_scaling_defaults_to_disabled() -> None:
+    assert BaseTrainingSchema.model_fields["loss_gradient_scaling"].get_default(call_default_factory=True) == (
+        LossGradientScalingSchema(enabled=False)
+    )
+
+
+@pytest.mark.parametrize("bad", [{"power": -1.0}, {"max_gain": 0.5}])
+def test_loss_gradient_scaling_rejects_invalid_options(bad: dict) -> None:
+    with pytest.raises(ValidationError):
+        LossGradientScalingSchema(enabled=True, **bad)

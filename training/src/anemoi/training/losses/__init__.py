@@ -18,6 +18,7 @@ from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
+from .scaler_tensor import LossScaler
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
@@ -43,6 +44,7 @@ __all__ = [
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
+    "LossScaler",
     "LossVariableMapper",
     "MAELoss",
     "MSELoss",

@@ -11,13 +11,19 @@
 import logging
 import uuid
 from collections.abc import Callable
+from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 from typing import Self
 
 import torch
+from torch import distributed as dist
 from torch import nn
+from torch.autograd import Function
+from torch.autograd.function import once_differentiable
+from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
 from anemoi.training.utils.enums import TensorDim
 
@@ -60,6 +66,246 @@ def as_dimension_tuple(dimensions: int | str | Sequence[int | str]) -> tuple[int
     if isinstance(dimensions, (int, str)):
         return (dimensions,)
     return tuple(dimensions)
+
+
+LOSS_SCALE_REL_EPS = 1e-8
+"""Variables whose gradient norm is below this fraction of the largest variable norm are treated as inactive."""
+
+
+class LossScaleFunction(Function):
+    """Identity in the forward pass; equalises the per-variable loss gradients in the backward pass.
+
+    Implements the loss-gradient rescaling of https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2. The
+    function takes one or more tensors ("segments") of equal rank and variable width. For every segment
+    the L2 norm of the gradient of each variable is taken over ``reduce_dims``; the remaining non-variable
+    dimensions index independent rows (e.g. (batch, time) for a gridded source, or one row per sample of a
+    tabular source). Within each row, the gradient of each variable is rescaled so that all active variables
+    end up with the same norm.
+
+    Variables whose gradient is (numerically) zero, e.g. outputs not seen by the loss or fully masked
+    observations, are left at zero and do not take part in the normalisation. The rescaling is
+    positively homogeneous of degree one, so it does not depend on the absolute scale of the loss.
+
+    All segments are handled by a single autograd node, so the norms need at most one all-reduce over the
+    model-parallel group. That all-reduce is required when the reduced dimensions are sharded, and harmless
+    when they are replicated: it multiplies every norm of a row by the same factor, and the weights only
+    depend on relative norms.
+    """
+
+    @staticmethod
+    def forward(
+        ctx: torch.autograd.function.FunctionCtx,
+        reduce_dims: tuple[int, ...],
+        var_dim: int,
+        power: float,
+        max_gain: float | None,
+        group: ProcessGroup | None,
+        *xs: torch.Tensor,
+    ) -> tuple[torch.Tensor, ...]:
+        """Return the inputs unchanged and store the backward options.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        reduce_dims : tuple[int, ...]
+            Dimensions the per-variable gradient norm is taken over (non-negative).
+        var_dim : int
+            Variable dimension (non-negative).
+        power : float
+            Exponent of the inverse gradient norm; 1 equalises the norms, 0 is the identity.
+        max_gain : float | None
+            Upper bound on the weight of the weakest variable relative to the strongest one.
+        group : ProcessGroup | None
+            Model-parallel group to all-reduce the norms over when the reduced dimensions are sharded.
+        *xs : torch.Tensor
+            Segments, all of the same rank and variable width.
+
+        Returns
+        -------
+        tuple[torch.Tensor, ...]
+            Views of the inputs, with this function's backward attached.
+        """
+        if not xs:
+            msg = "LossScaleFunction needs at least one tensor."
+            raise ValueError(msg)
+        ndim = xs[0].ndim
+        n_var = xs[0].shape[var_dim]
+        if any(x.ndim != ndim or x.shape[var_dim] != n_var for x in xs):
+            msg = "LossScaleFunction needs tensors of equal rank and variable width."
+            raise ValueError(msg)
+        if not 0 <= var_dim < ndim or any(not 0 <= d < ndim for d in reduce_dims):
+            msg = f"Dimensions out of range for {ndim}D tensors: reduce_dims={reduce_dims}, var_dim={var_dim}."
+            raise ValueError(msg)
+        if var_dim in reduce_dims:
+            msg = f"The variable dimension {var_dim} cannot be reduced over."
+            raise ValueError(msg)
+        if power < 0:
+            msg = f"power must be non-negative, got {power}."
+            raise ValueError(msg)
+
+        ctx.reduce_dims = tuple(reduce_dims)
+        ctx.var_dim = var_dim
+        ctx.power = power
+        ctx.max_gain = max_gain
+        ctx.group = group
+        return tuple(x.view_as(x) for x in xs)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx: torch.autograd.function.FunctionCtx, *grads: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
+        """Rescale the incoming gradients per variable.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        *grads : torch.Tensor
+            Gradients of the loss with respect to each segment.
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, ...]
+            None for the five non-tensor arguments, then the rescaled gradient of each segment.
+        """
+        var_dim = ctx.var_dim
+        # Low-precision gradients are upcast to float32; float64 is kept.
+        gs = [grad.to(torch.promote_types(grad.dtype, torch.float32)) for grad in grads]
+        n_var = gs[0].shape[var_dim]
+
+        # Squared per-variable norms of every row, flattened to (rows, variables) and stacked over segments.
+        row_shapes, flat_sq_norms = [], []
+        for g in gs:
+            sq_norm = g.square()
+            if ctx.reduce_dims:
+                sq_norm = sq_norm.sum(dim=ctx.reduce_dims, keepdim=True)
+            sq_norm = sq_norm.movedim(var_dim, -1)
+            row_shapes.append(sq_norm.shape)
+            flat_sq_norms.append(sq_norm.reshape(-1, n_var))
+        sq_norm = torch.cat(flat_sq_norms)
+
+        if ctx.group is not None and dist.get_world_size(group=ctx.group) > 1:
+            dist.all_reduce(sq_norm, group=ctx.group)
+        norm = sq_norm.sqrt()
+
+        tiny = torch.finfo(norm.dtype).tiny
+        rel_norm = norm / norm.amax(dim=-1, keepdim=True).clamp_min(tiny)
+        active = rel_norm > LOSS_SCALE_REL_EPS
+        weight = torch.where(active, rel_norm.clamp_min(LOSS_SCALE_REL_EPS).pow(-ctx.power), 0.0)
+        if ctx.max_gain is not None:
+            weight = weight.clamp_max(ctx.max_gain)
+
+        n_active = active.sum(dim=-1, keepdim=True)
+        weight = n_active * weight / weight.sum(dim=-1, keepdim=True).clamp_min(tiny)
+
+        rows = [flat.shape[0] for flat in flat_sq_norms]
+        scaled = [
+            (g * w.reshape(shape).movedim(-1, var_dim)).to(grad.dtype)
+            for g, grad, w, shape in zip(gs, grads, weight.split(rows), row_shapes, strict=True)
+        ]
+        return (None, None, None, None, None, *scaled)
+
+
+class LossScaler(nn.Module):
+    """Module wrapper around `LossScaleFunction`.
+
+    Works on a gridded or tabular `Source`, whose layout gives the axes: the per-variable gradient norm is
+    taken over the ensemble and grid axes (whichever the layout has), separately for every index of the
+    remaining axes. For gridded data that is one norm per (batch, time) row; for tabular data, where each
+    sample is its own tensor and time is folded into the grid axis, one norm per sample.
+
+    The module holds no parameters or buffers, so enabling or disabling it does not change the state dict.
+    """
+
+    def __init__(self, power: float = 1.0, max_gain: float | None = None) -> None:
+        """Initialise LossScaler.
+
+        Parameters
+        ----------
+        power : float, optional
+            Exponent of the inverse gradient norm; 1 equalises the norms, 0 is the identity. By default 1.0.
+        max_gain : float | None, optional
+            Upper bound on the weight of the weakest variable relative to the strongest one, by default None.
+        """
+        super().__init__()
+        if power < 0:
+            msg = f"power must be non-negative, got {power}."
+            raise ValueError(msg)
+        if max_gain is not None and max_gain < 1:
+            msg = f"max_gain must be at least 1, got {max_gain}."
+            raise ValueError(msg)
+        self.power = power
+        self.max_gain = max_gain
+
+    def _scale(
+        self,
+        tensors: Sequence[torch.Tensor],
+        layout: TensorLayout,
+        group: ProcessGroup | None,
+    ) -> tuple[torch.Tensor, ...]:
+        ndim = tensors[0].ndim
+        var_dim = layout.axis(TensorDim.VARIABLE, ndim=ndim)
+        reduce_dims = tuple(
+            layout.axis(name, ndim=ndim) for name in (TensorDim.ENSEMBLE_DIM, TensorDim.GRID) if layout.has_axis(name)
+        )
+        out = LossScaleFunction.apply(reduce_dims, var_dim, self.power, self.max_gain, group, *tensors)
+        return (out,) if isinstance(out, torch.Tensor) else tuple(out)
+
+    def forward(self, source: Source, group: ProcessGroup | None = None) -> Source:
+        """Apply the gradient rescaling to the predictions.
+
+        Parameters
+        ----------
+        source : Source
+            Predictions, gridded or tabular. The reduced and variable axes are read from its layout.
+        group : ProcessGroup | None, optional
+            Model-parallel group, passed only when the source is sharded. By default None.
+
+        Returns
+        -------
+        Source
+            The same source, with rescaled gradients in the backward pass.
+        """
+        if not isinstance(source, Source):
+            msg = (
+                f"LossScaler expects a Source (gridded or tabular), got {type(source).__name__}: "
+                "the axes to reduce over are taken from the source layout."
+            )
+            raise TypeError(msg)
+        if source.is_tabular:
+            if not source.values:
+                return source
+            return source.clone(values=list(self._scale(source.values, source.layout, group)))
+        return source.clone(values=self._scale([source.values], source.layout, group)[0])
+
+    @classmethod
+    def from_config(cls, config: object) -> "LossScaler | None":
+        """Build a LossScaler from `training.loss_gradient_scaling`, or None if disabled.
+
+        Parameters
+        ----------
+        config : object
+            A bool (legacy form), or a mapping or object with `enabled`, and optionally `power` and `max_gain`.
+
+        Returns
+        -------
+        LossScaler | None
+            The scaler, or None if gradient scaling is disabled.
+        """
+        if config is None or isinstance(config, bool):
+            return cls() if config else None
+
+        def get(key: str, default: Any) -> Any:
+            if isinstance(config, Mapping):
+                return config.get(key, default)
+            return getattr(config, key, default)
+
+        if not get("enabled", False):
+            return None
+        return cls(power=get("power", 1.0), max_gain=get("max_gain", None))
+
+    def extra_repr(self) -> str:
+        return f"power={self.power}, max_gain={self.max_gain}"
 
 
 TENSOR_SPEC = tuple[int | tuple[int, ...], torch.Tensor]

@@ -805,6 +805,15 @@ class CheckpointPipelineSchema(BaseModel):
     "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
 
 
+class LossGradientScalingSchema(BaseModel):
+    enabled: bool = False
+    "Rescale the loss gradient so that every active output variable gets the same gradient norm."
+    power: NonNegativeFloat = 1.0
+    "Exponent of the inverse per-variable gradient norm: 1 equalises the norms, 0 leaves the gradient unchanged."
+    max_gain: float | None = Field(default=None, ge=1.0)
+    "Upper bound on the weight of the weakest variable relative to the strongest one. Null for no bound."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -846,8 +855,8 @@ class BaseTrainingSchema(BaseModel):
     "Training loss configuration."
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."
-    loss_gradient_scaling: bool = False
-    "Dynamic rescaling of the loss gradient. Temporarily unavailable: must be false."
+    loss_gradient_scaling: LossGradientScalingSchema = Field(default_factory=LossGradientScalingSchema)
+    "Dynamic rescaling of the loss gradient per output variable. A bare bool sets `enabled`."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
@@ -872,6 +881,12 @@ class BaseTrainingSchema(BaseModel):
             error_msg = "training.strategy.static_graph must be false when training.accum_grad_batches > 1."
             raise ValueError(error_msg)
         return self
+
+    @field_validator("loss_gradient_scaling", mode="before")
+    @classmethod
+    def coerce_loss_gradient_scaling(cls, v: Any) -> Any:
+        """Accept the legacy bool form of `loss_gradient_scaling`."""
+        return {"enabled": v} if isinstance(v, bool) else v
 
 
 class SingleTrainingMethodSchema(BaseModel):

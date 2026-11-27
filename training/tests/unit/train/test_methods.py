@@ -45,6 +45,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
+from anemoi.training.losses import LossScaler
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
@@ -676,6 +677,106 @@ def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
         "grid_dim": -2,
         "grid_shard_sizes": None,
     }
+
+
+
+# ── BaseTrainingModule: loss gradient scaling ─────────────────────────────────
+
+
+class WeightedSumLoss(BaseLoss):
+    """Linear loss ``sum(weights * pred)``: its gradient w.r.t. the prediction is ``weights``."""
+
+    def __init__(self, weights: torch.Tensor) -> None:
+        super().__init__()
+        self.weights = weights
+
+    def forward(self, pred: Source, target: Source, **_kwargs: Any) -> torch.Tensor:
+        del target
+        return (pred.values * self.weights).sum()
+
+
+def _scaling_module(scaler: object, group: object = None) -> MagicMock:
+    module = MagicMock(spec=BaseTrainingModule)
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
+    module._requires_grad = BaseTrainingModule._requires_grad
+    module._is_sharded = BaseTrainingModule._is_sharded
+    module.loss_gradient_scaler = scaler
+    module.model_comm_group = group
+    return module
+
+
+def _variable_norms(grad: torch.Tensor) -> torch.Tensor:
+    """Per-variable gradient norms over (ensemble, grid) of a (batch, time, ensemble, grid, variable) tensor."""
+    return grad.square().sum(dim=(2, 3)).sqrt()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_base_compute_loss_applies_loss_gradient_scaler(enabled: bool) -> None:
+    """With the scaler enabled, every output variable reaches the model with the same gradient norm."""
+    weights = torch.rand(2, 1, 1, 6, 3) * torch.tensor([1.0, 100.0, 0.01])
+    module = _scaling_module(LossScaler() if enabled else None)
+    module.loss = {"data": WeightedSumLoss(weights)}
+
+    x = torch.zeros(2, 1, 1, 6, 3, requires_grad=True)
+    y = _gridded_view(torch.zeros(2, 1, 1, 6, 3), ["a", "b", "c"], {})
+    y_pred = _gridded_view(x, ["a", "b", "c"], {})
+    loss = BaseTrainingModule._compute_loss(module, y_pred=y_pred, y=y, dataset_name="data")
+
+    assert loss.item() == 0.0  # the reported loss value is unchanged
+    loss.backward()
+    if enabled:
+        norms = _variable_norms(x.grad)
+        torch.testing.assert_close(norms, norms[..., :1].expand_as(norms))
+    else:
+        torch.testing.assert_close(x.grad, weights)
+
+
+def test_base_compute_loss_skips_scaler_without_grad() -> None:
+    """Validation (no grad) and predictions that do not require grad bypass the scaler."""
+    scaler = MagicMock()
+    module = _scaling_module(scaler)
+    module.loss = {"data": CaptureLoss()}
+    y = _gridded_view(torch.zeros(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+
+    BaseTrainingModule._compute_loss(module, y_pred=y, y=y, dataset_name="data")
+    with torch.no_grad():
+        x = torch.zeros(1, 1, 1, 2, 3, requires_grad=True)
+        BaseTrainingModule._compute_loss(module, y_pred=_gridded_view(x, ["a", "b", "c"], {}), y=y, dataset_name="data")
+
+    scaler.assert_not_called()
+
+
+@pytest.mark.parametrize(("shard_sizes", "expect_group"), [(None, False), ([2, 2], True)])
+def test_base_compute_loss_passes_group_to_scaler_only_when_sharded(
+    shard_sizes: list[int] | None,
+    expect_group: bool,
+) -> None:
+    group = object()
+    scaler = MagicMock(side_effect=lambda source, group: source)
+    module = _scaling_module(scaler, group=group)
+    module.loss = {"data": CaptureLoss()}
+
+    x = torch.zeros(1, 1, 1, 2, 3, requires_grad=True)
+    y_pred = _gridded_view(x, ["a", "b", "c"], {}).clone(shard_sizes=shard_sizes)
+    BaseTrainingModule._compute_loss(module, y_pred=y_pred, y=y_pred, dataset_name="data")
+
+    scaler.assert_called_once()
+    assert scaler.call_args.kwargs["group"] is (group if expect_group else None)
+
+
+@pytest.mark.parametrize(
+    ("shard_sizes", "expected"),
+    [(None, False), ([None, None], False), ([None, [[2, 2]]], True)],
+)
+def test_is_sharded_for_tabular_sources(shard_sizes: list | None, expected: bool) -> None:
+    source = _tabular_view([torch.zeros(4, 2), torch.zeros(3, 2)], ["a", "b"], {}).clone(shard_sizes=shard_sizes)
+    assert BaseTrainingModule._is_sharded(source) is expected
+
+
+def test_requires_grad_checks_every_tabular_sample() -> None:
+    samples = [torch.zeros(4, 2), torch.zeros(3, 2, requires_grad=True)]
+    assert BaseTrainingModule._requires_grad(_tabular_view(samples, ["a", "b"], {}))
+    assert not BaseTrainingModule._requires_grad(_tabular_view([s.detach() for s in samples], ["a", "b"], {}))
 
 
 def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
