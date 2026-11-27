@@ -278,6 +278,37 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
         gradient_checkpointing: true
         layer_kernels: ${model.layer_kernels}
 
+``GatedFusionAggregator``
+   Sequential gated fusion into a principal dataset latent. The latent of
+   ``principal_source`` (default: the first configured dataset) is the
+   running latent; every other active dataset latent is folded into it by
+   its own ``GatedLatentFusion`` block, which adds
+   ``sigmoid(gate) * MLP([LN(latent), LN(source)])`` as a residual.
+   Because the gate can close, a block can learn to be a no-op.
+   Dataset latents may have different channel dimensions; the output
+   width is that of the principal dataset and must match the processor
+   width. With three or more datasets,
+   the merge order of the non-principal dataset latents is shuffled during training and follows
+   the configured order in evaluation.
+
+   ``value_init_scale`` scales the default initialisation of the output
+   projection of each block's value MLP (and zeroes its bias), while the
+   gate stays open. With ``value_init_scale: 0.0`` every block starts as an
+   exact identity. This makes it possible to add a dataset to a trained
+   model: with the ``transfer_learning`` loading strategy the new dataset's
+   fusion block is missing from the checkpoint and keeps this
+   initialisation, so the model's predictions are unchanged at the start of
+   fine-tuning. With ``value_init_scale: 0.0``, the new dataset's encoder
+   gets no gradient at first.
+
+   .. code:: yaml
+
+      latent_aggregator:
+        _target_: anemoi.models.layers.aggregator.GatedFusionAggregator
+        principal_source: era5
+        value_init_scale: null
+        gradient_checkpointing: false
+
 *********************************
   Decoder target node features
 *********************************
