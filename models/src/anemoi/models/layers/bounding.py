@@ -340,6 +340,21 @@ class LeakyFractionBounding(FractionBounding):
         return data
 
 
+def apply_boundings(boundings: nn.Module, x: "Source", target_forcings: "Source | None" = None) -> "Source":
+    """Apply the boundings of a dataset to its predictions, in order.
+
+    ``boundings`` is the module built by :func:`build_boundings` (a ``nn.Sequential``), but a single module or a
+    ``nn.ModuleList`` is accepted too. Boundings with ``uses_target_forcings`` also receive the output-time forcings.
+    """
+    modules = boundings if isinstance(boundings, (nn.Sequential, nn.ModuleList)) else [boundings]
+    for bounding in modules:
+        if getattr(bounding, "uses_target_forcings", False):
+            x = bounding(x, target_forcings=target_forcings)
+        else:
+            x = bounding(x)
+    return x
+
+
 def _build_dataset_boundings(
     bounding_cfgs: Any,
     data_indices: IndexCollection,

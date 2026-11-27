@@ -21,6 +21,7 @@ from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.layers.bounding import ForcingMaskBounding
 from anemoi.models.layers.bounding import ReluBounding
+from anemoi.models.layers.bounding import apply_boundings
 from anemoi.models.layers.forcing_functions import MaxInsolationOverWindow
 from anemoi.models.layers.forcing_functions import insolation
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
@@ -185,3 +186,19 @@ def test_model_passes_target_forcings_to_the_boundings() -> None:
     assert out[0, 0, 0, :, 0].tolist() == [0.0, 5.0]  # ssr masked where insolation <= 0
     assert out[0, 0, 0, :, 1].tolist() == [0.0, 2.0]  # t2m bounded by the ReLU
     assert math.isclose(float(x_out[0, 0, 0, 0, 0]), 5.0)  # the decoder output is not modified
+
+
+def test_apply_boundings_accepts_any_container() -> None:
+    pred = _pred(-1.0)
+    forcings = _source(torch.zeros(1, 1, 1, 4, 1), ["insolation"])
+    relu = ReluBounding(variables=["t2m"])
+    mask = ForcingMaskBounding(variables=["ssr"], normalizer=["none"], mask="insolation", fill_value=3.0)
+
+    # the module shapes a dataset's boundings can take: none, a single module, a list, the built sequence
+    assert torch.equal(apply_boundings(torch.nn.Sequential(), pred).values, pred.values)
+    assert torch.equal(apply_boundings(torch.nn.Identity(), pred).values, pred.values)
+    assert apply_boundings(torch.nn.ModuleList([relu]), pred).values[..., 1].max() == 0.0
+
+    out = apply_boundings(torch.nn.Sequential(relu, mask), pred, forcings).values
+    assert out[..., 0].min() == out[..., 0].max() == 3.0  # ssr filled where the forcing is <= 0
+    assert out[..., 1].max() == 0.0  # t2m clipped by the ReLU, applied first
