@@ -108,3 +108,18 @@ def test_build_graph_loads_existing_graph_without_nodes_in_config(tmp_path: Path
 def test_build_graph_without_nodes_or_stored_graph_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no static nodes"):
         build_graph(DotDict({}), {"grid": True}, "hidden", graph_path=tmp_path / "missing.pt")
+
+
+@pytest.mark.parametrize(("rank", "expect_written"), [("0", True), ("1", False)])
+def test_build_graph_saves_only_on_global_rank_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rank: str, expect_written: bool
+) -> None:
+    for key in ("RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("RANK", rank)
+    graph_path = tmp_path / "graph.pt"
+
+    graph, _ = build_graph(_graph_config([("grid", "hidden")]), IS_STATIC, "hidden", graph_path=graph_path)
+
+    assert "grid" in graph.node_types
+    assert graph_path.exists() == expect_written

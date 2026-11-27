@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -20,6 +21,18 @@ from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _global_rank() -> int:
+    """Global rank of this process, read from the environment.
+
+    The graph is built before ``torch.distributed`` starts, thus the rank comes from the
+    environment variables that the launcher sets.
+    """
+    for key in ("RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        if key in os.environ:
+            return int(os.environ[key])
+    return 0
 
 
 def hidden_node_names(hidden_nodes_name: str | list[str] | Mapping[str, str]) -> list[str]:
@@ -120,7 +133,7 @@ def build_graph(
     2. Split the graph config into its static and dynamic parts.
     3. Build the static nodes and edges missing from the loaded graph. When nothing was
        loaded, the whole static graph is created (post-processors included) and saved to
-       ``graph_path``.
+       ``graph_path``. Only global rank 0 saves the graph.
 
     Parameters
     ----------
@@ -177,7 +190,9 @@ def build_graph(
     graph = graph_creator.update_graph(graph)
     graph = graph_creator.clean(graph)
     graph = graph_creator.post_process(graph)
-    if graph_path is not None:
+    # Each rank builds the graph, but only global rank 0 writes it, because writes
+    # from many ranks to the same file can corrupt it.
+    if graph_path is not None and _global_rank() == 0:
         graph_creator.save(graph, save_path=graph_path, overwrite=overwrite)
 
     return graph, dynamic_graph_config
