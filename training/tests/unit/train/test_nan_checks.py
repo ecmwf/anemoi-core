@@ -72,7 +72,7 @@ def _filtered_loss(variable: str, *, ignore_nans: bool = False) -> torch.nn.Modu
                 "target_variables": [variable],
                 "ignore_nans": ignore_nans,
                 "scalers": [],
-            }
+            },
         ),
         data_indices=_module().data_indices["data"],
     )
@@ -93,7 +93,7 @@ def test_combined_loss_uses_each_childs_target_selection(ignore_nans: bool) -> N
         losses=[
             _filtered_loss("a"),
             TimeAggregateLossWrapper(["mean"], _filtered_loss("b", ignore_nans=ignore_nans)),
-        ]
+        ],
     )
     if ignore_nans:
         _check(loss)

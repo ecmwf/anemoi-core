@@ -284,7 +284,9 @@ def test_checkpoints_give_the_same_loss_without_gradients(no_gradients: type) ->
     with no_gradients():
         plain = make_loss()(_view(pred), _view(target), squash=False)
         result = make_loss(checkpoint_scales=True, variables_per_checkpoint=2)(
-            _view(pred), _view(target), squash=False
+            _view(pred),
+            _view(target),
+            squash=False,
         )
     torch.testing.assert_close(result, plain, rtol=1e-5, atol=1e-6)
 

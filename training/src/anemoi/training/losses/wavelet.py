@@ -367,7 +367,8 @@ class WaveletEnergyScoreLoss(BaseLoss):
             scores = self.point_scores(y_pred, y_target)
         else:
             scores = self.point_scores(
-                layout.conform_to(y_pred, _WAVELET_LAYOUT), layout.conform_to(y_target, _WAVELET_LAYOUT)
+                layout.conform_to(y_pred, _WAVELET_LAYOUT),
+                layout.conform_to(y_target, _WAVELET_LAYOUT),
             )
             scores = _WAVELET_LAYOUT.conform_to(scores, layout)
 
@@ -383,8 +384,16 @@ class WaveletEnergyScoreLoss(BaseLoss):
             )
 
         scores = self.scale(
-            scores, scaler_indices, layout=layout, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice
+            scores,
+            scaler_indices,
+            layout=layout,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(
-            scores, layout=layout, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None
+            scores,
+            layout=layout,
+            squash=squash,
+            squash_mode=squash_mode,
+            group=group if is_sharded else None,
         )
