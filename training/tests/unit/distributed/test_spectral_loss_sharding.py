@@ -23,7 +23,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
+from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import PowerSpectrumLoss
@@ -40,7 +40,7 @@ FFT2D = {"transform": "fft2d", "x_dim": 4, "y_dim": 4}
 LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 NLAT = 8
-OCTAHEDRAL_POINTS = sum(OctahedralSHT(nlat=NLAT, truncation=2).lons_per_lat)
+OCTAHEDRAL_POINTS = sum(octahedral_lons_per_lat(NLAT))
 REGULAR_POINTS = NLAT * 2 * NLAT
 CARTESIAN = {"x_dim": 8, "y_dim": 13}
 CARTESIAN_POINTS = CARTESIAN["x_dim"] * CARTESIAN["y_dim"]

@@ -23,6 +23,7 @@ from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseReducedSHT
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 
 DEVICES = [
     "cpu",
@@ -181,8 +182,8 @@ def test_graph_captured_in_inference_mode_replays_in_training(inverse):
     torch.testing.assert_close(got, want, rtol=3e-6, atol=3e-6)
 
 
+LONS = octahedral_lons_per_lat(24)
 TRUNCATION = 11
-LONS = OctahedralSHT(nlat=24, truncation=TRUNCATION).lons_per_lat
 COMPLEX = {torch.bfloat16: torch.complex64, torch.float16: torch.complex64, torch.float32: torch.complex64}
 COMPLEX[torch.float64] = torch.complex128
 
