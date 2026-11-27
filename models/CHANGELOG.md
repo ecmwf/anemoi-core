@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.21.1](https://github.com/ecmwf/anemoi-core/compare/models-0.21.0...models-0.21.1) (2026-11-27)
+
+
+### Features
+
+* **models, training:** Support for observations, `richer-batch` ([#1435](https://github.com/ecmwf/anemoi-core/issues/1435)) ([461ffc3](https://github.com/ecmwf/anemoi-core/commit/461ffc3dd0f2ad14757bae0848feab2518d274a1))
+* **models:** Add gated fusion latent aggregator ([#1583](https://github.com/ecmwf/anemoi-core/issues/1583)) ([bed7dad](https://github.com/ecmwf/anemoi-core/commit/bed7dad10510b53d72cf569f62b2340cba11f18f))
+
 ## [0.21.0](https://github.com/ecmwf/anemoi-core/compare/models-0.20.0...models-0.21.0) (2026-11-25)
 
 
