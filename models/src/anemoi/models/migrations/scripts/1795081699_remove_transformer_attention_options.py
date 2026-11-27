@@ -27,22 +27,28 @@ REMOVED_OPTIONS = ("softcap", "use_alibi_slopes", "use_rotary_embeddings")
 
 
 def _attention_sections(model_config: Any) -> dict[str, Any]:
-    """The processor, encoder and decoder settings in the model config, by their path in it.
+    """The processor, encoder, decoder and mapper settings in the model config, by their path in it.
 
-    Covers both the single ``encoder``/``decoder`` sections and the per-dataset ``encoders``/``decoders``.
+    Covers the single ``encoder``/``decoder`` sections and the per-dataset ``encoders``/``decoders``.
+    In a per-dataset section the attention options are in its ``mapper``, so the ``mapper`` of each
+    section is covered too.
     """
     sections = {name: model_config.get(name) for name in ("processor", "encoder", "decoder")}
     for group in ("encoders", "decoders"):
         for name, section in (model_config.get(group) or {}).items():
             sections[f"{group}.{name}"] = section
-    return {path: section for path, section in sections.items() if section is not None}
+    for path, section in list(sections.items()):
+        mapper = section.get("mapper") if hasattr(section, "get") else None
+        if hasattr(mapper, "get"):
+            sections[f"{path}.mapper"] = mapper
+    return {path: section for path, section in sections.items() if hasattr(section, "get")}
 
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
     Removes the attention options ``softcap``, ``use_alibi_slopes`` and
-    ``use_rotary_embeddings`` from the processor, encoder and decoder configs.
+    ``use_rotary_embeddings`` from the processor, encoder, decoder and mapper configs.
     The model weights are unchanged: none of these options has weights of its own.
 
     Before: ``model.processor.softcap: 0.0``, ``model.processor.use_alibi_slopes: False``,

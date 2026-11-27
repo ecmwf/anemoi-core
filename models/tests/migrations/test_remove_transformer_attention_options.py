@@ -74,3 +74,41 @@ def test_checkpoints_trained_with_an_option_switched_on_are_refused(option, valu
 
     with pytest.raises(ValueError, match=f"model.decoders.era5.{option}"):
         migration.migrate(checkpoint)
+
+
+def test_options_are_removed_from_the_mappers_of_encoders_and_decoders() -> None:
+    """In the training configs the options of a per-dataset encoder or decoder are in its mapper."""
+    checkpoint = _checkpoint(
+        {
+            "processor": _transformer(),
+            "encoders": {"0": {"source_datasets": ["data"], "mapper": _transformer()}},
+            "decoders": {"0": {"target_datasets": ["data"], "mapper": _transformer()}},
+        }
+    )
+
+    migration.migrate(checkpoint)
+
+    model = checkpoint["hyper_parameters"]["config"].model
+    for section in (model.encoders["0"].mapper, model.decoders["0"].mapper):
+        assert set(section) == {"num_heads", "attention_implementation"}
+    assert list(model.encoders["0"].source_datasets) == ["data"]
+
+
+@pytest.mark.parametrize("path", ["encoders.0.mapper", "decoders.0.mapper"])
+@pytest.mark.parametrize(
+    ("option", "value"), [("softcap", 30.0), ("use_alibi_slopes", True), ("use_rotary_embeddings", True)]
+)
+def test_mappers_trained_with_an_option_switched_on_are_refused(path, option, value) -> None:
+    model = {
+        "processor": _transformer(),
+        "encoders": {"0": {"mapper": _transformer()}},
+        "decoders": {"0": {"mapper": _transformer()}},
+    }
+    section = model
+    for key in path.split("."):
+        section = section[key]
+    section[option] = value
+    checkpoint = _checkpoint(model)
+
+    with pytest.raises(ValueError, match=f"model.{path}.{option}"):
+        migration.migrate(checkpoint)
