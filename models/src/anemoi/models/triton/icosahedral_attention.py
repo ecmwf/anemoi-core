@@ -46,7 +46,10 @@ def _configs() -> list[triton.Config]:
     ]
 
 
-_AUTOTUNE_KEY = ["N", "RADIUS", "NUM_QUERIES", "NUM_KEYS", "HEAD_DIM", "DOT_PRECISION", "WIDE"]
+# The numbers of queries and keys of a shard are runtime arguments, so one compiled kernel serves shards of
+# every size. Autotuning is keyed by their size class (bit length of the number of queries), so shards of
+# similar size share one tuning run.
+_AUTOTUNE_KEY = ["N", "RADIUS", "SIZE_CLASS", "HEAD_DIM", "DOT_PRECISION", "WIDE"]
 
 
 # Points per block of exception queries or corrected keys; tl.dot needs at least 16 rows.
@@ -312,7 +315,7 @@ def _near(rows_a, cols_a, rows_b, cols_b, RADIUS: tl.constexpr):
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES", "NUM_KEYS", "SIZE_CLASS"])
 def _ico_fwd(
     Q,
     K,
@@ -343,8 +346,9 @@ def _ico_fwd(
     RADIUS: tl.constexpr,
     SIZE: tl.constexpr,
     REGION_STRIDE: tl.constexpr,
-    NUM_QUERIES: tl.constexpr,
-    NUM_KEYS: tl.constexpr,
+    NUM_QUERIES,
+    NUM_KEYS,
+    SIZE_CLASS,  # bit length of NUM_QUERIES, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,  # "ieee" for float32 inputs, so their products are not rounded to TF32
     WIDE: tl.constexpr,  # point offsets need 64 bits
@@ -400,7 +404,7 @@ def _ico_fwd(
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES", "NUM_KEYS", "SIZE_CLASS"])
 def _ico_bwd_dq(
     Q,
     K,
@@ -438,8 +442,9 @@ def _ico_bwd_dq(
     RADIUS: tl.constexpr,
     SIZE: tl.constexpr,
     REGION_STRIDE: tl.constexpr,
-    NUM_QUERIES: tl.constexpr,
-    NUM_KEYS: tl.constexpr,
+    NUM_QUERIES,
+    NUM_KEYS,
+    SIZE_CLASS,  # bit length of NUM_QUERIES, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     WIDE: tl.constexpr,
@@ -507,7 +512,7 @@ def _ico_bwd_dq(
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES", "NUM_KEYS", "SIZE_CLASS"])
 def _ico_bwd_dkdv(
     Q,
     K,
@@ -545,8 +550,9 @@ def _ico_bwd_dkdv(
     RADIUS: tl.constexpr,
     SIZE: tl.constexpr,
     REGION_STRIDE: tl.constexpr,
-    NUM_QUERIES: tl.constexpr,
-    NUM_KEYS: tl.constexpr,
+    NUM_QUERIES,
+    NUM_KEYS,
+    SIZE_CLASS,  # bit length of NUM_QUERIES, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     WIDE: tl.constexpr,
@@ -628,7 +634,7 @@ def _block_chunk(COLUMNS, WORDS, chunk, ROW_BLOCK: tl.constexpr):
     return tl.where(tok >= 0, tok, 0), tok >= 0, pairs
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES"])
 def _ico_block_fwd(
     Q,
     K,
@@ -654,7 +660,7 @@ def _ico_block_fwd(
     stride_ob,
     stride_oh,
     stride_on,
-    NUM_QUERIES: tl.constexpr,
+    NUM_QUERIES,
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     WIDE: tl.constexpr,
@@ -696,7 +702,7 @@ def _ico_block_fwd(
     tl.store(INV_L + bh * NUM_QUERIES + q_tok, inv_l, mask=q_valid)
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES"])
 def _ico_block_dq(
     Q,
     K,
@@ -729,7 +735,7 @@ def _ico_block_dq(
     stride_ob,  # strides of OUT and DQ, which have the same layout
     stride_oh,
     stride_on,
-    NUM_QUERIES: tl.constexpr,
+    NUM_QUERIES,
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     WIDE: tl.constexpr,
@@ -787,7 +793,7 @@ def _ico_block_dq(
     tl.store(DQ + o_offs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_QUERIES"])
 def _ico_block_dkdv(
     Q,
     K,
@@ -821,7 +827,7 @@ def _ico_block_dkdv(
     stride_gb,  # strides of DK and DV, which have the same layout
     stride_gh,
     stride_gn,
-    NUM_QUERIES: tl.constexpr,
+    NUM_QUERIES,
     HEAD_DIM: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     WIDE: tl.constexpr,
@@ -941,6 +947,7 @@ class IcosahedralAttentionTriton(torch.autograd.Function):
             REGION_STRIDE=tables.region_stride,
             NUM_QUERIES=num_queries,
             NUM_KEYS=shard.num_keys,
+            SIZE_CLASS=num_queries.bit_length(),
             HEAD_DIM=head_dim,
             DOT_PRECISION=_dot_precision(q.dtype),
         )
