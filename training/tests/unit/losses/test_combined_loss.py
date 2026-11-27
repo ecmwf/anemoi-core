@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
@@ -422,3 +423,167 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     out.backward()
     assert pred.grad is not None
     assert torch.isfinite(pred.grad).all()
+
+
+def _remaining_data_indices() -> IndexCollection:
+
+    # Model output order: tp, t2m, msl, tc_mask (forcing f0 is not an output).
+    data_config = {"forcing": ["f0"], "diagnostic": ["tc_mask"], "target": []}
+    name_to_index = {"tp": 0, "f0": 1, "t2m": 2, "msl": 3, "tc_mask": 4}
+    return IndexCollection(DictConfig(data_config), name_to_index)
+
+
+def _remaining_config(*children: dict) -> DictConfig:
+    return DictConfig(
+        {
+            "_target_": "anemoi.training.losses.CombinedLoss",
+            "losses": [{"scalers": ["grid_uniform"], **child} for child in children],
+        },
+    )
+
+
+_REMAINING_SCALERS = {"grid_uniform": ((TensorDim.GRID,), torch.ones(4))}
+_MSE = "anemoi.training.losses.MSELoss"
+_MAE = "anemoi.training.losses.MAELoss"
+
+
+def test_combined_loss_remaining_variables_resolved_in_model_output_order() -> None:
+    data_indices = _remaining_data_indices()
+    loss = get_loss_function(
+        _remaining_config(
+            # Sibling listed first and in a different order than the model output.
+            {"_target_": _MAE, "predicted_variables": ["tc_mask", "tp"]},
+            {"_target_": _MSE, "predicted_variables": "remaining"},
+        ),
+        scalers=_REMAINING_SCALERS,
+        data_indices=data_indices,
+    )
+    assert loss.losses[0].predicted_variables == ["tc_mask", "tp"]
+    assert loss.losses[1].predicted_variables == ["t2m", "msl"]
+    assert loss.losses[1].target_variables == ["t2m", "msl"]
+
+
+def test_combined_loss_remaining_variables_first_child_and_forward() -> None:
+    data_indices = _remaining_data_indices()
+    loss = get_loss_function(
+        _remaining_config(
+            {"_target_": _MSE, "predicted_variables": "remaining"},
+            {"_target_": _MAE, "predicted_variables": ["tc_mask"]},
+        ),
+        scalers=_REMAINING_SCALERS,
+        data_indices=data_indices,
+    )
+    assert loss.losses[0].predicted_variables == ["tp", "t2m", "msl"]
+
+    pred = torch.full((1, 1, 1, 4, 4), 2.0)
+    target = torch.zeros((1, 1, 1, 4, 4))
+    layouts = {"pred_layout": IndexSpace.MODEL_OUTPUT, "target_layout": IndexSpace.MODEL_OUTPUT}
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash_mode="avg", **layouts)
+    # MSE on 3 variables: 4 per point; MAE on tc_mask: 2 per point; both averaged over the 4 grid points.
+    expected = get_loss_function(
+        _remaining_config(
+            {"_target_": _MSE, "predicted_variables": ["tp", "t2m", "msl"]},
+            {"_target_": _MAE, "predicted_variables": ["tc_mask"]},
+        ),
+        scalers=_REMAINING_SCALERS,
+        data_indices=data_indices,
+    )(_gridded_source_view(pred), _gridded_source_view(target), squash_mode="avg", **layouts)
+    torch.testing.assert_close(out, expected)
+
+
+def test_combined_loss_remaining_variables_nested_in_wrapper() -> None:
+    data_indices = _remaining_data_indices()
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
+                        "time_aggregation_types": ["mean"],
+                        "loss_fn": {"_target_": _MSE, "scalers": ["grid_uniform"], "predicted_variables": "remaining"},
+                    },
+                    {"_target_": _MAE, "scalers": ["grid_uniform"], "predicted_variables": ["tp"]},
+                ],
+            },
+        ),
+        scalers=_REMAINING_SCALERS,
+        data_indices=data_indices,
+    )
+    assert loss.losses[0].predicted_variables == ["t2m", "msl", "tc_mask"]
+
+
+def test_combined_loss_remaining_variables_unchanged_for_explicit_lists() -> None:
+    """Configs without `remaining` are passed through untouched."""
+    from anemoi.training.losses.combined import _resolve_remaining_variables
+
+    losses = (
+        {"_target_": _MSE, "predicted_variables": ["tp"]},
+        {"_target_": _MAE},
+    )
+    assert _resolve_remaining_variables(losses, _remaining_data_indices()) is losses
+
+
+def test_combined_loss_remaining_variables_does_not_mutate_config() -> None:
+    config = _remaining_config(
+        {"_target_": _MSE, "predicted_variables": "remaining"},
+        {"_target_": _MAE, "predicted_variables": ["tp"]},
+    )
+    get_loss_function(config, scalers=_REMAINING_SCALERS, data_indices=_remaining_data_indices())
+    assert config.losses[0].predicted_variables == "remaining"
+
+
+def test_combined_loss_remaining_variables_multiple_remaining_rejected() -> None:
+    with pytest.raises(InstantiationException, match="Only one child loss"):
+        get_loss_function(
+            _remaining_config(
+                {"_target_": _MSE, "predicted_variables": "remaining"},
+                {"_target_": _MAE, "predicted_variables": "remaining"},
+            ),
+            scalers=_REMAINING_SCALERS,
+            data_indices=_remaining_data_indices(),
+        )
+
+
+def test_combined_loss_remaining_variables_sibling_without_variables_rejected() -> None:
+    with pytest.raises(InstantiationException, match="covers all variables"):
+        get_loss_function(
+            _remaining_config(
+                {"_target_": _MSE, "predicted_variables": "remaining"},
+                {"_target_": _MAE},
+            ),
+            scalers=_REMAINING_SCALERS,
+            data_indices=_remaining_data_indices(),
+        )
+
+
+def test_combined_loss_remaining_variables_empty_result_rejected() -> None:
+    with pytest.raises(InstantiationException, match="resolves to no variables"):
+        get_loss_function(
+            _remaining_config(
+                {"_target_": _MSE, "predicted_variables": "remaining"},
+                {"_target_": _MAE, "predicted_variables": ["tp", "t2m", "msl", "tc_mask"]},
+            ),
+            scalers=_REMAINING_SCALERS,
+            data_indices=_remaining_data_indices(),
+        )
+
+
+def test_combined_loss_remaining_variables_without_data_indices_rejected() -> None:
+    with pytest.raises(InstantiationException, match="requires data indices"):
+        get_loss_function(
+            _remaining_config(
+                {"_target_": _MSE, "predicted_variables": "remaining"},
+                {"_target_": _MAE, "predicted_variables": ["tp"]},
+            ),
+            scalers=_REMAINING_SCALERS,
+        )
+
+
+def test_remaining_variables_outside_combined_loss_rejected() -> None:
+    with pytest.raises(TypeError, match="only supported on a child of a CombinedLoss"):
+        get_loss_function(
+            DictConfig({"_target_": _MSE, "scalers": ["grid_uniform"], "predicted_variables": "remaining"}),
+            scalers=_REMAINING_SCALERS,
+            data_indices=_remaining_data_indices(),
+        )

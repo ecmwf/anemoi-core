@@ -178,6 +178,16 @@ def _check_subgrid_resolved(loss_config: dict) -> None:
         raise TypeError(msg)
 
 
+def _check_predicted_variables(predicted_variables: object) -> None:
+    """Reject a string ``predicted_variables``; ``remaining`` is resolved by the parent CombinedLoss."""
+    if isinstance(predicted_variables, str):
+        msg = (
+            f"`predicted_variables: {predicted_variables}` is only supported on a child of a CombinedLoss "
+            "(with `remaining`), otherwise it must be a list of variable names."
+        )
+        raise TypeError(msg)
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -227,6 +237,7 @@ def get_loss_function(
     scalers_to_include = loss_config.pop("scalers", [])
     target_cls = get_class(loss_config["_target_"])
     predicted_variables = loss_config.pop("predicted_variables", None)
+    _check_predicted_variables(predicted_variables)
     target_variables = loss_config.pop("target_variables", None)
     compatibility_options = loss_config.pop("check_variables_compatibility", {})
 

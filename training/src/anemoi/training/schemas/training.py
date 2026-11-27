@@ -291,6 +291,12 @@ class CheckVariablesCompatibilitySchema(BaseModel):
     a list of variable names skips only those variables."""
 
 
+PredictedVariablesSchema = list[str] | Literal["remaining"] | None
+"""Variables a loss is computed on. ``"remaining"`` is only valid on a child of a CombinedLoss
+and selects all model output variables not listed by its siblings.
+"""
+
+
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
@@ -298,7 +304,7 @@ class BaseLossSchema(BaseModel):
     "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
-    predicted_variables: list[str] | None = None
+    predicted_variables: PredictedVariablesSchema = None
     target_variables: list[str] | None = None
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
@@ -344,7 +350,7 @@ class EnsembleScoreLossSchema(BaseModel):
 
     scalers: list[str] = Field(default_factory=list, example=["variable"])
     ignore_nans: bool = False
-    predicted_variables: list[str] | None = None
+    predicted_variables: PredictedVariablesSchema = None
     target_variables: list[str] | None = None
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
@@ -724,6 +730,38 @@ class CombinedLossSchema(BaseLossSchema):
         if loss_weights is not None and len(losses) != len(loss_weights):
             error_msg = "Number of losses and weights must match"
             raise ValueError(error_msg)
+        return self
+
+    @model_validator(mode="after")
+    def check_remaining_variables(self) -> Self:
+        """Check that ``predicted_variables: remaining`` is used at most once, next to explicit sibling lists."""
+
+        def predicted_variables(loss: Any) -> PredictedVariablesSchema:
+            # Wrappers take their variable selection from the inner loss.
+            for key in ("per_scale_loss", "loss_fn"):
+                inner = getattr(loss, key, None)
+                if inner is not None:
+                    return predicted_variables(inner)
+            return getattr(loss, "predicted_variables", None)
+
+        selections = [predicted_variables(loss) for loss in self.losses]
+        remaining = [i for i, selection in enumerate(selections) if isinstance(selection, str)]
+        if not remaining:
+            return self
+        if len(remaining) > 1:
+            msg = (
+                "Only one child loss of a CombinedLoss can use `predicted_variables: remaining`, "
+                f"found {len(remaining)} (children {remaining})."
+            )
+            raise ValueError(msg)
+        for i, selection in enumerate(selections):
+            if i != remaining[0] and selection is None:
+                msg = (
+                    f"Child loss {i} of a CombinedLoss has no `predicted_variables`, so it covers all variables, "
+                    f"which leaves nothing for the child {remaining[0]} using `predicted_variables: remaining`. "
+                    f"List the variables of child {i} explicitly."
+                )
+                raise ValueError(msg)
         return self
 
 

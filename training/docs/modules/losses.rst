@@ -183,6 +183,32 @@ wrapper only smooths or aggregates the selected variables. Pairing differently
 named variables also enables the compatibility checks described in
 :ref:`variable-compatibility-checks`.
 
+Within a ``CombinedLoss``, one child can set ``predicted_variables:
+remaining`` to cover all model output variables that its siblings do not
+list, in model output order. The example below uses ``MSELoss`` on every
+variable except ``tc_mask``, and a ``MAELoss`` on ``tc_mask`` only:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.combined.CombinedLoss
+         loss_weights: [1.0, 0.1]
+         losses:
+           - _target_: anemoi.training.losses.MSELoss
+             scalers: [pressure_level, general_variable, node_weights]
+             predicted_variables: remaining
+           - _target_: anemoi.training.losses.MAELoss
+             scalers: [node_weights]
+             predicted_variables: [tc_mask]
+
+Only one child can use ``remaining``, and every other child must list its
+``predicted_variables`` explicitly (a child without them already covers all
+variables). An error is raised if no variables are left. The value is
+resolved from the model output variables, so it is only valid on a child of a
+``CombinedLoss``.
+
 ******************************
  Time Aggregate Loss Functions
 ******************************

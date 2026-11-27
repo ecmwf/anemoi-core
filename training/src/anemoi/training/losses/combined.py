@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import copy
 import functools
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -15,6 +16,7 @@ from typing import Any
 
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
@@ -23,6 +25,107 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+
+REMAINING_VARIABLES = "remaining"
+"""Value of ``predicted_variables`` selecting all variables not claimed by sibling losses."""
+
+_NESTED_LOSS_KEYS = ("per_scale_loss", "loss_fn")
+
+
+def _variable_holder(loss_config: dict[str, Any]) -> dict[str, Any]:
+    """Return the (possibly nested) config holding ``predicted_variables`` for a child loss.
+
+    Wrappers such as ``MultiscaleLossWrapper`` and ``TimeAggregateLossWrapper`` take their
+    variable selection from the inner loss (``per_scale_loss`` / ``loss_fn``).
+    """
+    for key in _NESTED_LOSS_KEYS:
+        inner = loss_config.get(key)
+        if isinstance(inner, dict):
+            return _variable_holder(inner)
+    return loss_config
+
+
+def _is_remaining(value: Any) -> bool:
+    return isinstance(value, str) and value == REMAINING_VARIABLES
+
+
+def _resolve_remaining_variables(
+    losses: tuple[dict[str, Any] | Callable | BaseLoss, ...],
+    data_indices: IndexCollection | None,
+) -> tuple[dict[str, Any] | Callable | BaseLoss, ...]:
+    """Replace ``predicted_variables: remaining`` by the variables not claimed by sibling losses.
+
+    The remaining variables are all model output variables, in model output order,
+    that are not listed in the ``predicted_variables`` of the other child losses.
+
+    Parameters
+    ----------
+    losses : tuple
+        Child loss specifications of a ``CombinedLoss``.
+    data_indices : IndexCollection | None
+        Training data indices, used for the model output variable names.
+
+    Returns
+    -------
+    tuple
+        The child loss specifications, with ``remaining`` resolved to an explicit list.
+        Returned unchanged if no child uses ``remaining``.
+
+    Raises
+    ------
+    ValueError
+        If more than one child uses ``remaining``, if a sibling does not list its
+        ``predicted_variables`` (so it already covers all variables), if ``data_indices``
+        is missing, or if no variables remain.
+    """
+    configs = [OmegaConf.to_container(loss, resolve=True) if isinstance(loss, DictConfig) else loss for loss in losses]
+    remaining_idx = [
+        i
+        for i, cfg in enumerate(configs)
+        if isinstance(cfg, dict) and _is_remaining(_variable_holder(cfg).get("predicted_variables"))
+    ]
+    if not remaining_idx:
+        return losses
+
+    if len(remaining_idx) > 1:
+        msg = (
+            f"Only one child loss of a CombinedLoss can use `predicted_variables: {REMAINING_VARIABLES}`, "
+            f"found {len(remaining_idx)} (children {remaining_idx})."
+        )
+        raise ValueError(msg)
+    idx = remaining_idx[0]
+
+    if data_indices is None:
+        msg = f"`predicted_variables: {REMAINING_VARIABLES}` requires data indices to know the model output variables."
+        raise ValueError(msg)
+
+    claimed: set[str] = set()
+    for i, cfg in enumerate(configs):
+        if i == idx:
+            continue
+        explicit = _variable_holder(cfg).get("predicted_variables") if isinstance(cfg, dict) else None
+        if explicit is None:
+            msg = (
+                f"Child loss {i} of a CombinedLoss has no `predicted_variables`, so it covers all variables, "
+                f"which leaves nothing for the child {idx} using `predicted_variables: {REMAINING_VARIABLES}`. "
+                f"List the variables of child {i} explicitly."
+            )
+            raise ValueError(msg)
+        claimed.update(explicit)
+
+    remaining = [name for name in data_indices.model.output.ordered_names if name not in claimed]
+    if not remaining:
+        msg = (
+            f"`predicted_variables: {REMAINING_VARIABLES}` on child loss {idx} of a CombinedLoss resolves to no "
+            "variables: the other child losses already cover all model output variables."
+        )
+        raise ValueError(msg)
+
+    resolved = list(losses)
+    config = copy.deepcopy(configs[idx])
+    _variable_holder(config)["predicted_variables"] = remaining
+    resolved[idx] = config
+    return tuple(resolved)
 
 
 class CombinedLoss(BaseLoss):
@@ -105,6 +208,10 @@ class CombinedLoss(BaseLoss):
             loss_weights: [1.0, 0.6]
             # Each child loss specifies its own scalers
         ```
+
+        One child may set `predicted_variables: remaining` to cover all model output
+        variables not listed by its siblings, in model output order. All siblings must
+        then list their `predicted_variables` explicitly.
         """
         super().__init__()
 
@@ -116,6 +223,8 @@ class CombinedLoss(BaseLoss):
 
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
+
+        losses = _resolve_remaining_variables(losses, data_indices)
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
