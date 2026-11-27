@@ -404,3 +404,29 @@ def test_static_graph_provider_expands_edge_attr_with_batch(trainable_size: int)
     assert edge_attr.shape == (batch_size * num_edges, provider.edge_dim)
     # Every sample sees the same (dst-sorted) static attributes.
     torch.testing.assert_close(edge_attr[:, :1], provider.edge_attr.repeat(batch_size, 1))
+
+
+@pytest.mark.parametrize(("warn", "expect_warning"), [(None, True), (True, True), (False, False)])
+def test_projection_graph_provider_row_sum_warning_can_be_disabled(tmp_path, caplog, warn, expect_warning) -> None:
+    expected = torch.tensor([[1.0, 0.5, 0.0], [0.0, 1.0, 1.0]])
+    file_path = tmp_path / "projection.npz"
+    save_npz(file_path, csr_matrix(expected.numpy()))
+    kwargs = {} if warn is None else {"warn_if_not_row_normalized": warn}
+
+    with caplog.at_level("WARNING", logger="anemoi.models.layers.graph_provider"):
+        provider = ProjectionGraphProvider(file_path=file_path, **kwargs)
+
+    assert ("rows do not sum to 1" in caplog.text) is expect_warning
+    assert torch.allclose(provider.get_edges().to_dense(), expected)  # the flag does not change the matrix
+
+
+def test_projection_graph_provider_row_sum_warning_can_be_disabled_from_graph(caplog) -> None:
+    graph = HeteroData()
+    graph["src"].num_nodes = 3
+    graph["dst"].num_nodes = 2
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
+
+    with caplog.at_level("WARNING", logger="anemoi.models.layers.graph_provider"):
+        ProjectionGraphProvider(graph=graph, edges_name=("src", "to", "dst"), warn_if_not_row_normalized=False)
+
+    assert "rows do not sum to 1" not in caplog.text

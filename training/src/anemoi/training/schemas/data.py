@@ -15,6 +15,7 @@ from pydantic import Field
 
 from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC001
 from anemoi.models.schemas.spatial_processors import SpatialProcessorSchema  # noqa: TC001
+from anemoi.training.utils.target_smoothing import TargetSmoothingSchema  # noqa: TC001
 
 
 class DatasetDataSchema(PydanticBaseModel):
@@ -38,6 +39,11 @@ class DatasetDataSchema(PydanticBaseModel):
     (
         "Spatial preprocessor applied to this dataset before normalization "
         "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
+    )
+    target_smoothing: TargetSmoothingSchema | None = Field(default=None)
+    (
+        "Spatial smoothing of selected non-input variables (e.g. a diagnostic mask) of the training batch, "
+        "applied before normalisation. Training only: not stored in the checkpoint, inference is unchanged."
     )
 
 
