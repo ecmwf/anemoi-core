@@ -20,6 +20,7 @@ from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.activations import leaky_hardtanh
+from anemoi.models.layers.forcing_functions import physical_forcing
 from anemoi.models.preprocessing.normalization import check_normalization_method
 from anemoi.models.preprocessing.normalization import missing_statistics
 from anemoi.models.preprocessing.normalization import normalize_value
@@ -167,6 +168,98 @@ class NormalizedLeakyReluBounding(NormalizedReluBounding):
 
     def bound(self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, **_kwargs) -> torch.Tensor:
         data[..., indices] = torch.nn.functional.leaky_relu(data[..., indices] - norm_min_val) + norm_min_val
+        return data
+
+
+class ForcingMaskBounding(NormalizedReluBounding):
+    """Set variables to a fill value where a condition on the output-time forcings holds.
+
+    The condition is ``mask <operator> threshold``, evaluated in physical units at each output time. ``mask`` is
+    either the name of a forcing, read from the target forcings, or a callable computing a quantity from the
+    target forcings, such as :class:`~anemoi.models.layers.forcing_functions.MaxInsolationOverWindow`.
+
+    Example: zero accumulated radiation where the sun was down for the whole accumulation period::
+
+        _target_: anemoi.models.layers.bounding.ForcingMaskBounding
+        variables: [ssr, ssrd, fdir]
+        normalizer: [mean-std, mean-std, mean-std]
+        mask:
+          _target_: anemoi.models.layers.forcing_functions.MaxInsolationOverWindow
+          window: 6h  # the model's output timestep
+
+    Parameters
+    ----------
+    variables : list[str]
+        Variables to overwrite.
+    normalizer : list[str]
+        Normalisation method of each variable, to normalise the fill value.
+    mask : str | Callable[[Source], torch.Tensor]
+        Forcing name, or callable returning a ``(batch, time, ensemble, grid)`` tensor in physical units.
+    operator : str, optional
+        ``lt``, ``le``, ``gt`` or ``ge``, by default ``le``.
+    threshold : float, optional
+        Threshold in physical units, by default 0.
+    fill_value : float, optional
+        Value in physical units, by default 0.
+    mask_normalizer : str, optional
+        Normalisation method of the forcing when ``mask`` is a forcing name, by default ``none``.
+    """
+
+    #: The model passes the output-time forcings of the dataset to ``forward``.
+    uses_target_forcings = True
+
+    OPERATORS = {"lt": torch.lt, "le": torch.le, "gt": torch.gt, "ge": torch.ge}
+
+    def __init__(
+        self,
+        *,
+        variables: list[str],
+        normalizer: list[str],
+        mask: Any,
+        operator: str = "le",
+        threshold: float = 0.0,
+        fill_value: float = 0.0,
+        mask_normalizer: str = "none",
+        **kwargs,
+    ) -> None:
+        super().__init__(variables=variables, min_val=[float(fill_value)] * len(variables), normalizer=normalizer)
+        if operator not in self.OPERATORS:
+            msg = f"{self.__class__.__name__}: unknown operator {operator!r}, expected one of {list(self.OPERATORS)}."
+            raise ValueError(msg)
+        if not (isinstance(mask, str) or callable(mask)):
+            raise TypeError(f"{self.__class__.__name__}: mask must be a forcing name or a callable, got {mask!r}.")
+        check_normalization_method(mask_normalizer, self.__class__.__name__)
+        self.mask = mask
+        self.operator = operator
+        self.threshold = float(threshold)
+        self.mask_normalizer = mask_normalizer
+
+    def forward(self, x: "Source", target_forcings: "Source | None" = None) -> "Source":
+        if target_forcings is None:
+            raise ValueError(f"{self.__class__.__name__} needs the output-time forcings (target_forcings).")
+        if x.is_tabular or target_forcings.is_tabular:
+            raise ValueError(f"{self.__class__.__name__} supports gridded datasets only.")
+
+        if isinstance(self.mask, str):
+            value = physical_forcing(target_forcings, self.mask, self.mask_normalizer)
+        else:
+            value = self.mask(target_forcings)
+        condition = self.OPERATORS[self.operator](value, self.threshold)  # (batch, time, ensemble, grid)
+        if condition.shape[-1] != x.grid_size or condition.shape[1] != x.time_size:
+            raise ValueError(
+                f"{self.__class__.__name__}: the mask has shape {tuple(condition.shape)} but the predictions have "
+                f"{x.time_size} times and {x.grid_size} grid points."
+            )
+
+        data_index = self._get_indices(x.name_to_index).to(x.device)
+        fill = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.device)
+        return x.apply_func(self.bound, indices=data_index, norm_min_val=fill, condition=condition)
+
+    def bound(
+        self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, condition: torch.Tensor, **_kwargs
+    ) -> torch.Tensor:
+        fill = norm_min_val.to(device=data.device, dtype=data.dtype)
+        data[..., indices] = torch.where(condition.unsqueeze(-1).to(data.device), fill, data[..., indices])
         return data
 
 

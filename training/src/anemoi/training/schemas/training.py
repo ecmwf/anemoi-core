@@ -21,7 +21,6 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
-from pydantic import RootModel
 from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
@@ -806,21 +805,6 @@ class CheckpointPipelineSchema(BaseModel):
     "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
 
 
-class ForcingMaskSchema(RootModel[dict[Any, Any]]):
-    """Set predicted variables to fixed values where a condition on a forcing holds.
-
-    Laid out like the imputer config: ``mask_variable`` (required), optional ``operator``, ``threshold``,
-    ``offsets`` and ``combine``, and numeric keys (fill values) listing the variables to set to them.
-    """
-
-    @model_validator(mode="after")
-    def check_layout(self) -> "ForcingMaskSchema":
-        from anemoi.training.utils.forcing_mask import ForcingMask
-
-        ForcingMask.from_config(self.root)
-        return self
-
-
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -878,8 +862,6 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer and LR scheduler configuration."
     metrics: DatasetDict[list[str]]
     "List of metrics"
-    forcing_mask: DatasetDict[ForcingMaskSchema] | None = Field(default=None)
-    "Optional mask, depending on a forcing, applied to predictions before the loss. Not for transport methods."
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 

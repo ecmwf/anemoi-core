@@ -294,6 +294,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
+                target_forcings=target_forcings.get(dataset_name, None) if target_forcings is not None else None,
             )
 
         return Batch(x_out_dict)

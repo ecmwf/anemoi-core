@@ -568,6 +568,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         template: "BaseTemplate",
         dtype: torch.dtype,
         dataset_name: str,
+        target_forcings: "Source | None" = None,
     ) -> "Source":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
@@ -575,7 +576,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # The decoder output becomes a source shaped and named like the template.
         pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
         pred = self._add_residual(pred, x_skip, dataset_name)
-        pred = self.boundings[dataset_name](pred)
+        for bounding in self.boundings[dataset_name]:
+            # boundings that depend on forcings (e.g. ForcingMaskBounding) receive the output-time forcings
+            if getattr(bounding, "uses_target_forcings", False):
+                pred = bounding(pred, target_forcings=target_forcings)
+            else:
+                pred = bounding(pred)
 
         return pred
 
@@ -995,6 +1001,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
+                target_forcings=target_forcings.get(dataset_name, None) if target_forcings is not None else None,
             )
 
         return Batch(x_out_dict)

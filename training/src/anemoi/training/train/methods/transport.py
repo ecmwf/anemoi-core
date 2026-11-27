@@ -234,8 +234,6 @@ class TransportTraining(BaseTrainingModule):
     them and says what the model learns from the noisy target.
     """
 
-    supports_forcing_mask = False  # the prediction is a noised-target objective, not the output fields
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_single_step_task()
