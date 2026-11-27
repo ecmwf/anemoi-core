@@ -27,6 +27,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -350,6 +351,13 @@ class BaseGraphModel(nn.Module):
         self.residual = torch.nn.ModuleDict()
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
+            # A dataset without a decoder never has a skip added, so its residual is not used.
+            if dataset_name not in self.target_datasets:
+                LOGGER.warning(
+                    "Ignoring residual for dataset '%s': it has no decoder. Remove it from model.residual.",
+                    dataset_name,
+                )
+                continue
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
                 residual_config,
@@ -360,6 +368,9 @@ class BaseGraphModel(nn.Module):
                 dataset_name=dataset_name,
                 sparse_projector_num_chunks=sparse_projector_num_chunks,
             )
+        for dataset_name in self.dataset_names:
+            if dataset_name not in self.target_datasets:
+                self.residual[dataset_name] = NoSkipConnection()
 
     def _build_named_node_attributes_graph(self) -> HeteroData:
         node_attributes_graph = HeteroData()

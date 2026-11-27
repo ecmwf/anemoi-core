@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models.base import BaseGraphModel
 
@@ -122,6 +123,19 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
 
     assert model.seen_hidden_name == "hidden"
     assert "data" in model.residual
+
+
+@pytest.mark.parametrize("configure_forcing_residual", [False, True])
+def test_input_only_dataset_gets_no_skip_connection(configure_forcing_residual: bool) -> None:
+    """A dataset without a decoder gets NoSkipConnection, even if a residual is configured."""
+    model = SimpleNamespace(target_datasets=["data"], dataset_names=["data", "forcing"])
+    residual_configs = {}
+    if configure_forcing_residual:
+        residual_configs["forcing"] = {"_target_": "anemoi.models.layers.residual.SkipConnection"}
+
+    BaseGraphModel._build_residual(model, residual_configs, {})
+
+    assert isinstance(model.residual["forcing"], NoSkipConnection)
 
 
 def test_hierarchical_routing_accepts_omegaconf_hidden_node_lists() -> None:

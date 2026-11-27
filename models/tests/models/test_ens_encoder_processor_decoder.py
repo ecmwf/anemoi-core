@@ -10,6 +10,7 @@
 import torch
 from torch import nn
 
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 
@@ -25,9 +26,8 @@ class _NodeAttributes(nn.Module):
         return torch.zeros(batch_size * self.num_nodes, self.num_features)
 
 
-def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
+def _make_model(residual: nn.Module, prognostic_indices: list[int]) -> tuple[AnemoiEnsModelEncProcDec, torch.Tensor]:
     batch_size, input_steps, ensemble_size, num_nodes, num_variables = 2, 3, 2, 5, 4
-    prognostic_indices = [0, 2]
     node_features = 3
 
     model = AnemoiEnsModelEncProcDec.__new__(AnemoiEnsModelEncProcDec)
@@ -39,12 +39,19 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
     model.num_input_channels_prognostic = {"data": len(prognostic_indices)}
     model._internal_input_idx = {"data": prognostic_indices}
     model.node_attributes = _NodeAttributes(num_nodes, node_features)
-    model.residual = nn.ModuleDict({"data": SkipConnection()})
+    model.residual = nn.ModuleDict({"data": residual})
 
     x = torch.arange(
         batch_size * input_steps * ensemble_size * num_nodes * num_variables,
         dtype=torch.float32,
     ).reshape(batch_size, input_steps, ensemble_size, num_nodes, num_variables)
+    return model, x
+
+
+def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
+    prognostic_indices = [0, 2]
+    model, x = _make_model(SkipConnection(), prognostic_indices)
+    batch_size, input_steps, ensemble_size, num_nodes, num_variables = x.shape
 
     x_data_latent, x_skip, grid_shard_sizes = model._assemble_input(
         x,
@@ -53,6 +60,7 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
         dataset_name="data",
     )
 
+    node_features = model.node_attributes.attr_ndims["data"]
     expected_num_features = input_steps * num_variables + node_features + 1 + len(prognostic_indices)
     assert model._calculate_input_dim("data") == expected_num_features
     assert x_data_latent.shape == (batch_size * ensemble_size * num_nodes, expected_num_features)
@@ -61,3 +69,19 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
 
     expected_conditioning = x[:, -1, ..., prognostic_indices].reshape(-1, len(prognostic_indices))
     torch.testing.assert_close(x_data_latent[:, -len(prognostic_indices) :], expected_conditioning)
+
+
+def test_assemble_input_without_residual() -> None:
+    model, x = _make_model(NoSkipConnection(), [])
+    batch_size, _, ensemble_size, _, _ = x.shape
+
+    x_data_latent, x_skip, grid_shard_sizes = model._assemble_input(
+        x,
+        fcstep=1,
+        batch_ens_size=batch_size * ensemble_size,
+        dataset_name="data",
+    )
+
+    assert x_skip is None
+    assert x_data_latent.shape[-1] == model._calculate_input_dim("data")
+    assert grid_shard_sizes is None

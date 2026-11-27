@@ -76,6 +76,13 @@ model config. ``TruncatedConnection`` accepts sibling-class kwargs such
 as ``step`` transparently, so switching between connection types requires
 only changing ``_target_``.
 
+.. note::
+
+   A dataset with an encoder and no decoder has no output for a skip.
+   Leave it out of ``residual``. An entry configured for it is ignored,
+   and a warning is logged. Weights that an older checkpoint saved for
+   that residual are dropped on load.
+
 ``TruncatedConnection`` supports two modes, both via the
 ``truncation_config`` key:
 

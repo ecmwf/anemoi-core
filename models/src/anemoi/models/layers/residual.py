@@ -87,6 +87,35 @@ class SkipConnection(BaseResidualConnection):
         return self._expand_time(x_skip, n_step_output)
 
 
+class NoSkipConnection(BaseResidualConnection):
+    """Residual for a dataset without a decoder.
+
+    Returns no skip, so nothing is added to the output. Saved weights from an
+    older checkpoint, for a residual this dataset used to have, are dropped.
+    """
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> None:
+        """Return no skip."""
+        return None
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
+        """Drop checkpoint keys from old ckpts, then load normally.
+
+        ``state_dict`` is a copy of the keys under ``prefix``. Deleting from it
+        leaves the checkpoint and every other module unchanged.
+        """
+        own = {prefix + name for name in self.state_dict()}
+        for key in [key for key in state_dict if key.startswith(prefix) and key not in own]:
+            del state_dict[key]
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection.
 

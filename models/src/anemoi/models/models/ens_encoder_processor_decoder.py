@@ -104,7 +104,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             dim=-1,  # feature dimension
         )
 
-        if self.condition_on_residual:
+        if self.condition_on_residual and x_skip is not None:
             x_skip_cond = x_skip[:, 0]
             x_skip_cond = x_skip_cond[..., self._internal_input_idx[dataset_name]]
             x_data_latent = torch.cat(

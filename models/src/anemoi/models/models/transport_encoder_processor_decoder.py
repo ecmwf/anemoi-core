@@ -728,11 +728,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
+        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)
+        if x_skip is not None:
+            x_skip = x_skip[..., self._internal_input_idx[dataset_name]]
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_sizes is not None:
@@ -747,7 +747,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        if self.condition_on_residual:
+        if self.condition_on_residual and x_skip is not None:
             x_data_latent = torch.cat(
                 (x_data_latent, einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars")), dim=-1
             )
@@ -1076,6 +1076,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             x_skip = self.residual[dataset_name](
                 in_x, grid_shard_sizes_i, model_comm_group, n_step_output=self.n_step_output
             )
+            if x_skip is None:
+                continue
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             # Keep only prognostic input variables, matching the tendency reference state.
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]

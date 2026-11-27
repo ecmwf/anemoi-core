@@ -14,6 +14,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -183,6 +184,56 @@ def test_skipconnection(flat_data):
     expected_out = flat_data[:, -1, ...]
 
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
+
+
+def test_no_skip_connection_returns_none(flat_data):
+    assert NoSkipConnection()(flat_data) is None
+
+
+def _old_forcing_residual(kind: str):
+    """A residual an input-only dataset could have had before NoSkipConnection."""
+    if kind == "skip":
+        return SkipConnection()
+    if kind == "scalar":
+        return ScalarOrnsteinConnection(data_indices=_make_data_indices(0))
+    if kind == "spectral":
+        graph, _, _ = _make_regular_graph()
+        graph["forcing"].x = graph["data"].x
+        return SpectralOrnsteinConnection(
+            lmax=2,
+            grid="regular",
+            truncate=True,
+            graph=graph,
+            data_indices=_make_data_indices(0),
+            dataset_name="forcing",
+        )
+    raise ValueError(f"Unknown residual kind {kind!r}.")
+
+
+@pytest.mark.parametrize("kind", ["skip", "scalar", "spectral"])
+def test_no_skip_connection_loads_old_residual_state(kind):
+    """Loading an old checkpoint ignores forcing weights and keeps the data weight."""
+    data = ScalarOrnsteinConnection(data_indices=_make_data_indices(3))
+    data.weight.data.fill_(1.0)
+    old = torch.nn.ModuleDict({"residual": torch.nn.ModuleDict({"data": data, "forcing": _old_forcing_residual(kind)})})
+
+    new = torch.nn.ModuleDict(
+        {
+            "residual": torch.nn.ModuleDict(
+                {
+                    "data": ScalarOrnsteinConnection(data_indices=_make_data_indices(3)),
+                    "forcing": NoSkipConnection(),
+                }
+            )
+        }
+    )
+
+    if kind != "skip":
+        assert any(key.startswith("residual.forcing.") for key in old.state_dict())
+
+    new.load_state_dict(old.state_dict(), strict=True)
+
+    assert torch.equal(new["residual"]["data"].weight, old["residual"]["data"].weight)
 
 
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────
