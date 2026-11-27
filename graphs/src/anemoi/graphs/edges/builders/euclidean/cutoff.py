@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Literal
 
 import torch
 from sklearn.neighbors import NearestNeighbors
@@ -35,8 +36,16 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
         attributes: list | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, attributes=attributes)
+        super().__init__(
+            source_name,
+            target_name,
+            source_mask_attr_name,
+            target_mask_attr_name,
+            attributes=attributes,
+            backend=backend,
+        )
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
         assert not (cutoff_factor is None and cutoff_distance_km is None), (
@@ -61,6 +70,10 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         self.cutoff_distance_km = cutoff_distance_km
         self.max_num_neighbours = max_num_neighbours
 
+    def _use_pyg_lib(self) -> bool:
+        """Use pyg-lib unless the sklearn backend is requested."""
+        return self.backend == "auto" and super()._use_pyg_lib()
+
     def get_cutoff_radius(self, reference_coords: torch.Tensor) -> float:
         """Compute the cut-off radius.
 
@@ -79,7 +92,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             The cut-off radius in Cartesian coordinates on unit sphere.
         """
         if self.cutoff_distance_km is not None:
-            LOGGER.info(
+            LOGGER.debug(
                 "Using %s (with radius = %.1f km [direct]) between %s and %s.",
                 self.__class__.__name__,
                 self.cutoff_distance_km,
@@ -94,7 +107,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             # Use factor-based approach
             reference_dist = get_grid_reference_distance(reference_coords, use_cartesian=False)
             radius = reference_dist * self.cutoff_factor
-            LOGGER.info(
+            LOGGER.debug(
                 "Using %s (with radius = %.1f km [factor=%.2f]) between %s and %s.",
                 self.__class__.__name__,
                 radius * EARTH_RADIUS,
@@ -209,6 +222,9 @@ class CutOffEdges(BaseCutOffEdges):
         The name of the target mask attribute to filter edge connections.
     max_num_neighbours : int
         The maximum number of nearest neighbours to consider when building edges.
+    backend : {"auto", "sklearn"}
+        "auto" uses pyg-lib when installed and sklearn otherwise. "sklearn" always uses sklearn, which keeps
+        the nearest ``max_num_neighbours`` within the cut-off; pyg-lib keeps an arbitrary subset of them.
 
     Methods
     -------
@@ -245,6 +261,9 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         The name of the target mask attribute to filter edge connections.
     max_num_neighbours : int
         The maximum number of nearest neighbours to consider when building edges.
+    backend : {"auto", "sklearn"}
+        "auto" uses pyg-lib when installed and sklearn otherwise. "sklearn" always uses sklearn, which keeps
+        the nearest ``max_num_neighbours`` within the cut-off; pyg-lib keeps an arbitrary subset of them.
 
     Methods
     -------
@@ -256,15 +275,9 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         Update the graph with the edges.
     """
 
+    reversed_search = True
+
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=source_coords)
         return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
-
-    def compute_edge_index_from_coords(
-        self,
-        source_coords: torch.Tensor,
-        target_coords: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)

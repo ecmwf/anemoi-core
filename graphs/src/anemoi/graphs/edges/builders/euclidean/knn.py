@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Literal
 
 import numpy as np
 import torch
@@ -30,9 +31,17 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
         attributes: list | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, attributes=attributes)
+        super().__init__(
+            source_name,
+            target_name,
+            source_mask_attr_name,
+            target_mask_attr_name,
+            backend=backend,
+            attributes=attributes,
+        )
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
@@ -165,13 +174,7 @@ class ReversedKNNEdges(BaseKNNEdges):
         Update the graph with the edges.
     """
 
-    def compute_edge_index_from_coords(
-        self,
-        source_coords: torch.Tensor,
-        target_coords: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
+    reversed_search = True
 
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
@@ -222,6 +225,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         reversed_num_nearest_neighbours: int | None = None,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
         attributes: list | None = None,
     ) -> None:
         super().__init__(
@@ -230,6 +234,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
             source_mask_attr_name,
             target_mask_attr_name,
             attributes=attributes,
+            backend=backend,
         )
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
@@ -265,6 +270,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         num_nearest_neighbours: int,
         reversed_num_nearest_neighbours: int,
+        skip_flip: bool = False,
         **_kwargs,
     ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
@@ -273,7 +279,12 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         # Reversed: for each source node, its nearest target nodes.
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
         reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
-        return intersect_edges(forward, reversed_)
+        edge_index = intersect_edges(forward, reversed_)
+        # The rows are already (source, target); skip_flip means the coordinate arguments were
+        # swapped upstream and are expected the other way round, matching the scikit-learn branch.
+        if skip_flip:
+            edge_index = torch.flip(edge_index, [0])
+        return edge_index
 
     def _compute_adj_matrix_sklearn(
         self,

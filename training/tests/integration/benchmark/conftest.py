@@ -62,8 +62,8 @@ def benchmark_config(
         overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
     elif test_case == "edm_diffusion_tendency":
-        overrides = []
-        base_config = "transport_edm_diffusion_tendency"
+        overrides = ["model=graphtransformer_transport_tendency"]
+        base_config = "transport"
     elif test_case == "temporal_downscaler_ensemble":
         overrides = []
         base_config = "temporal_downscaler_ensemble"
