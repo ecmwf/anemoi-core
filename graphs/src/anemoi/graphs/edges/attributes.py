@@ -487,7 +487,7 @@ class RadialBasisFeatures(EdgeLength):
 
         Used by the dynamic graph providers to size the edge feature dimension at construction time (before any edges
         exist).
-        """        
+        """
         return len(self.centers)
 
     def __init__(
