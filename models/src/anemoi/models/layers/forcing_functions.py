@@ -16,9 +16,9 @@ import math
 from typing import TYPE_CHECKING
 
 import torch
-from anemoi.utils.dates import as_timedelta
 
 from anemoi.models.preprocessing.normalization import normalization_coefficients
+from anemoi.utils.dates import as_timedelta
 
 if TYPE_CHECKING:
     from anemoi.models.data import Source

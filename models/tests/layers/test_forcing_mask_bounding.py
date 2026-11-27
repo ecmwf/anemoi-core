@@ -56,8 +56,9 @@ def _time_forcings(dates: list[datetime.datetime], lat_deg, lon_deg) -> GriddedS
         day = 2 * np.pi * (delta.days + delta.seconds / 86400) / 365.25
         hours = date.hour + date.minute / 60
         local = 2 * np.pi * ((lon / 360 * 24 + hours) % 24) / 24
-        values[0, t, 0] = np.stack([np.full_like(lon, np.cos(day)), np.full_like(lon, np.sin(day)),
-                                    np.cos(local), np.sin(local)], axis=-1)
+        values[0, t, 0] = np.stack(
+            [np.full_like(lon, np.cos(day)), np.full_like(lon, np.sin(day)), np.cos(local), np.sin(local)], axis=-1
+        )
     return _source(torch.from_numpy(values), TIME_FORCINGS, lat_deg=np.broadcast_to(lat_deg, lon.shape).copy())
 
 
@@ -85,8 +86,13 @@ def test_threshold_and_fill_value_are_physical() -> None:
     forcings = _source(((physical - 0.5) / 0.25).reshape(1, 1, 1, 4, 1), ["insolation"], forcing_stats)
     pred_stats = {"mean": np.array([2.0, 0.0]), "stdev": np.array([4.0, 1.0])}
     bounding = ForcingMaskBounding(
-        variables=["ssr"], normalizer=["mean-std"], mask="insolation", mask_normalizer="mean-std",
-        operator="lt", threshold=0.2, fill_value=10.0,
+        variables=["ssr"],
+        normalizer=["mean-std"],
+        mask="insolation",
+        mask_normalizer="mean-std",
+        operator="lt",
+        threshold=0.2,
+        fill_value=10.0,
     )
 
     out = bounding(_pred(3.0, statistics=pred_stats), target_forcings=forcings).values
