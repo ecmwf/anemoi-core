@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from anemoi.models.data.time import shift_reference_dates
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
@@ -147,9 +148,10 @@ class BaseForecaster(BaseTask):
     def measure_targets_from_step(self, targets: "Batch", rollout_step: int = 0, **_kwargs) -> "Batch":
         """Measure the targets' point times from the forecast time of ``rollout_step``.
 
-        Each rollout step moves the forecast time on by one rollout shift.
+        Each rollout step moves the forecast time on by one rollout shift, so the targets' time
+        offsets and point timedeltas drop by it and their reference dates advance by it.
         """
-        return _shift_point_times(targets, -self._rollout_shift * rollout_step)
+        return targets.shift_time_reference(self._rollout_shift * rollout_step)
 
     def _advance_gridded_input(
         self,
@@ -309,7 +311,8 @@ class BaseForecaster(BaseTask):
             output_mask=output_mask,
             grid_shard_slice=grid_shard_slice,
         )
-        return x.clone(values=new_data)
+        # The windows now hold the next step's times: same offsets from a reference one shift later.
+        return x.clone(values=new_data, reference_date=shift_reference_dates(x.reference_date, self._rollout_shift))
 
     def _advance_tabular_input(
         self,
@@ -323,8 +326,9 @@ class BaseForecaster(BaseTask):
         Input windows that remain inputs move to their new position. Each new input window is
         the output window at the same time: a dataset the model decodes takes its predicted
         values there for its prognostic variables, with the observed forcings; a dataset it does
-        not decode takes the observations. Timedeltas are measured from the current forecast
-        time, which moves on by one rollout shift, so every window's timedeltas drop by that shift.
+        not decode takes the observations. Times are measured from the current forecast time,
+        which moves on by one rollout shift, so every window's time offset and point timedeltas
+        drop by that shift and the reference dates advance by it.
 
         Parameters
         ----------
@@ -362,8 +366,7 @@ class BaseForecaster(BaseTask):
             raise ValueError(msg)
         ordered = [windows[i] for i in range(x.time_size)]
         advanced = ordered[0].concat_time(*ordered[1:])
-        shift = self._rollout_shift.total_seconds()
-        return advanced.clone(timedeltas=[timedeltas - shift for timedeltas in advanced.timedeltas])
+        return advanced.shift_time_reference(self._rollout_shift)
 
     def log_extra(self, logger: Callable, logger_enabled: bool, batch_size: int | None = None) -> None:
         """Log any task-specific information."""
@@ -569,23 +572,6 @@ class OffsetForecaster(BaseForecaster):
                 )
                 raise ValueError(msg)
         return input_offsets, output_offsets, rollout_shift
-
-
-def _shift_point_times(batch: "Batch", shift: datetime.timedelta) -> "Batch":
-    """Return ``batch`` with the timedeltas of its tabular sources moved by ``shift``."""
-    if not shift:
-        return batch
-    seconds = shift.total_seconds()
-    return batch.with_sources(
-        {
-            name: (
-                source.clone(timedeltas=[timedeltas + seconds for timedeltas in source.timedeltas])
-                if source.is_tabular
-                else source
-            )
-            for name, source in batch.items()
-        },
-    )
 
 
 def _match_ensemble_size(source: "TabularSource", ensemble_size: int) -> "TabularSource":

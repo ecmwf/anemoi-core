@@ -152,8 +152,12 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
             raise ValueError(msg)
         fn = agg_fns[agg_op]
-        pred_agg = pred.clone(values=fn(pred.values, dim=self._time_axis(pred), keepdim=True))
-        target_agg = target.clone(values=fn(target.values, dim=self._time_axis(target), keepdim=True))
+        # The aggregate spans the whole window rather than one time step, so it has no time offset.
+        pred_agg = pred.clone(values=fn(pred.values, dim=self._time_axis(pred), keepdim=True), time_offsets=None)
+        target_agg = target.clone(
+            values=fn(target.values, dim=self._time_axis(target), keepdim=True),
+            time_offsets=None,
+        )
         return self.loss(pred_agg, target_agg, **shared_kwargs)
 
     def _compute_diff_loss(
@@ -175,8 +179,9 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
         for step in range(pred_diff.shape[pred_axis]):
             step_loss = self.loss(
-                pred.clone(values=pred_diff.narrow(pred_axis, step, 1)),
-                target.clone(values=target_diff.narrow(target_axis, step, 1)),
+                # A difference between two steps has no single time offset.
+                pred.clone(values=pred_diff.narrow(pred_axis, step, 1), time_offsets=None),
+                target.clone(values=target_diff.narrow(target_axis, step, 1), time_offsets=None),
                 **shared_kwargs,
             )
             if time_weights is not None:

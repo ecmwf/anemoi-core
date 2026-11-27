@@ -9,6 +9,7 @@
 
 """The base class of the samples, and the helpers shared by its kinds."""
 
+import datetime
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Callable
@@ -16,6 +17,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from typing import Any
 from typing import ClassVar
 from typing import Self
@@ -26,6 +28,10 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data.sources import Source
+from anemoi.models.data.time import TimeOffsets
+from anemoi.models.data.time import as_datetime
+from anemoi.models.data.time import as_time_offsets
+from anemoi.models.data.time import check_time_offsets
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
@@ -57,6 +63,13 @@ class BaseSample(ABC):
         ``(N, 2)`` ``(latitude, longitude)`` of each point, in **radians**.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis, as produced by ``anemoi-datasets``.
+    time_offsets : tuple[datetime.timedelta, ...], optional
+        One offset per entry of the time axis (a gridded step or a tabular window), measured
+        from the sample's reference time (relative offset 0). Shared by every sample of a batch.
+        ``None`` when unknown.
+    reference_date : datetime.datetime, optional
+        Absolute date of the reference time, so ``reference_date + time_offsets[t]`` is the
+        time of step ``t``. ``None`` when unknown.
     """
 
     values: torch.Tensor | None
@@ -64,6 +77,26 @@ class BaseSample(ABC):
     layout: TensorLayout
     coordinates: torch.Tensor
     statistics: Mapping[str, Any] = field(default_factory=dict)
+    time_offsets: TimeOffsets | None = None
+    reference_date: datetime.datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Normalise the time information to plain :mod:`datetime` values and check its length."""
+        object.__setattr__(self, "time_offsets", as_time_offsets(self.time_offsets))
+        if self.reference_date is not None:
+            object.__setattr__(self, "reference_date", as_datetime(self.reference_date))
+        if self.time_size is not None:
+            check_time_offsets(self.__class__.__name__, self.time_offsets, self.time_size)
+
+    @property
+    @abstractmethod
+    def time_size(self) -> int | None:
+        """Number of entries along the sample's time axis, or ``None`` when the sample has no data to tell."""
+        ...
+
+    def with_time_reference(self, reference_date: Any, time_offsets: Sequence[Any]) -> Self:
+        """Return the sample with its time steps placed at ``reference_date + time_offsets``."""
+        return replace(self, reference_date=reference_date, time_offsets=time_offsets)
 
     @classmethod
     @abstractmethod
@@ -98,11 +131,15 @@ class BaseSample(ABC):
         ``name``, the ``batch_size``, ``ensemble_size`` and ``time_size`` of the batch to
         decode, and the arguments specific to this kind. The default passes them on
         unchanged, except for the per-sample ``layout``, which becomes the layout of the
-        collated source as in :meth:`collate`; a kind whose template describes its geometry
+        collated source as in :meth:`collate`, and the ``reference_date``, which is repeated
+        for each of the ``batch_size`` samples; a kind whose template describes its geometry
         differently converts them.
         """
         del n_points, device
         kwargs["layout"] = cls._collate_layout(kwargs["layout"])
+        reference_date = kwargs.pop("reference_date", None)
+        if reference_date is not None:
+            kwargs["reference_date"] = [reference_date] * kwargs.get("batch_size", 1)
         return cls.template_type(**kwargs)
 
     # The :class:`Source` subclass this kind collates into.
@@ -120,10 +157,13 @@ class BaseSample(ABC):
     OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ()
 
     # Fields that describe the dataset rather than the sample: identical across the batch.
-    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
+    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics", "time_offsets")
 
     # Fields that vary between samples, kept as one value per sample by :meth:`_collate_dynamic_attrs`.
-    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
+    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("reference_date",)
+
+    # Dynamic fields that may be ``None``: collated to ``None`` when unset in every sample.
+    _OPTIONAL_DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("reference_date",)
 
     @classmethod
     @abstractmethod
@@ -139,8 +179,21 @@ class BaseSample(ABC):
 
     @classmethod
     def _collate_dynamic_attrs(cls, samples: Sequence[Self]) -> dict[str, Any]:
-        """Return the fields in :attr:`_DYNAMIC_ATTRS` as lists of one value per sample."""
-        return {attr: [getattr(s, attr) for s in samples] for attr in cls._DYNAMIC_ATTRS}
+        """Return the fields in :attr:`_DYNAMIC_ATTRS` as lists of one value per sample.
+
+        A field of :attr:`_OPTIONAL_DYNAMIC_ATTRS` that is ``None`` in every sample collates to
+        ``None`` rather than a list of ``None``; a mix of set and unset values is rejected.
+        """
+        attrs = {attr: [getattr(s, attr) for s in samples] for attr in cls._DYNAMIC_ATTRS}
+        for attr in cls._OPTIONAL_DYNAMIC_ATTRS:
+            values = attrs[attr]
+            n_unset = sum(value is None for value in values)
+            if n_unset == len(values):
+                attrs[attr] = None
+            elif n_unset:
+                msg = f"The batch mixes samples with and without {attr!r} ({n_unset} of {len(values)} without)."
+                raise ValueError(msg)
+        return attrs
 
     @classmethod
     def _collate_metadata(cls, name: str, samples: Sequence[Self]) -> dict[str, Any]:

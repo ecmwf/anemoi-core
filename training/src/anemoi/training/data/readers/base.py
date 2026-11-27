@@ -238,14 +238,34 @@ class BaseAnemoiReader(ABC):
         in **radians**.
         """
 
-    def measure_from_reference(self, sample: BaseSample, reference: int, positions: TimeIndices) -> BaseSample:
-        """Return ``sample`` with its point times measured from the sample's reference time.
+    def step_dates(self, sequence: int, positions: TimeIndices) -> np.ndarray:
+        """Return the ``datetime64[s]`` date of each of ``positions`` in ``sequence``.
 
-        ``reference`` is the position of the reference time (relative offset 0) and ``positions``
-        are the positions the sample was read from. Gridded samples carry no point times.
+        Single-sequence readers take them from their own :attr:`dates`; readers with several
+        sequences override this.
         """
-        del reference, positions
-        return sample
+        del sequence
+        dates = np.asarray(self.dates).astype("datetime64[s]")
+        return dates[np.atleast_1d(np.arange(len(dates))[positions])]
+
+    def measure_from_reference(
+        self,
+        sample: BaseSample,
+        sequence: int,
+        reference: int,
+        positions: TimeIndices,
+    ) -> BaseSample:
+        """Return ``sample`` with its time steps measured from the sample's reference time.
+
+        ``reference`` is the position of the reference time (relative offset 0) in ``sequence``
+        and ``positions`` are the positions the sample was read from. The sample gets the
+        reference date and one time offset per step (see
+        :meth:`~anemoi.models.data.sample.BaseSample.with_time_reference`); a tabular sample also
+        moves its point timedeltas onto the reference time.
+        """
+        reference_date = self.step_dates(sequence, reference)[0]
+        offsets = self.step_dates(sequence, positions) - reference_date
+        return sample.with_time_reference(reference_date, offsets)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

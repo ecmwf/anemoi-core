@@ -19,6 +19,7 @@ Covers:
 
 from __future__ import annotations
 
+import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -128,18 +129,23 @@ def test_tabular_reader_measures_timedeltas_from_the_reference_time() -> None:
     reader.data.dates = np.arange("2024-01-01T00", "2024-01-02T00", np.timedelta64(6, "h"), dtype="datetime64[s]")
     sample = reader.get_sample(0, [1, 2])
 
-    measured = reader.measure_from_reference(sample, reference=2, positions=[1, 2])
+    measured = reader.measure_from_reference(sample, sequence=0, reference=2, positions=[1, 2])
 
     # Window 0 is read at 06h and window 1 at 12h; the reference time is 12h.
     expected = torch.as_tensor(payload.timedeltas, dtype=torch.float32) + torch.tensor([-21600.0] * 2 + [0.0] * 2)
     torch.testing.assert_close(measured.timedeltas, expected)
+    assert measured.reference_date == datetime.datetime.fromisoformat("2024-01-01T12:00")
+    assert measured.time_offsets == (datetime.timedelta(hours=-6), datetime.timedelta(0))
 
 
 def test_tabular_sample_rejects_offsets_for_a_different_number_of_windows() -> None:
     sample = _make_obs_sample(n=4, v=1, n_times=2)
 
-    with pytest.raises(ValueError, match="has 2 time windows, but 3 window offsets"):
-        sample.with_time_offsets([0.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="has 2 time steps but 3 time offsets"):
+        sample.with_time_reference(
+            datetime.datetime.fromisoformat("2024-01-01T00:00"),
+            [datetime.timedelta(hours=h) for h in (0, 1, 2)],
+        )
 
 
 def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> GriddedSample:

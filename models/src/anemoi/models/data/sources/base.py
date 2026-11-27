@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -26,6 +27,13 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.time import TimeOffsets
+from anemoi.models.data.time import as_reference_dates
+from anemoi.models.data.time import as_time_offsets
+from anemoi.models.data.time import check_time_offsets
+from anemoi.models.data.time import format_time_offsets
+from anemoi.models.data.time import shift_reference_dates
+from anemoi.models.data.time import shift_time_offsets
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -152,6 +160,12 @@ class Source(ABC):
         metadata). Not interpreted here, and kept unchanged by every transformation,
         including those that change the variables (:meth:`select_variables`,
         :meth:`select`): per-variable entries are the caller's to update.
+    time_offsets : tuple[datetime.timedelta, ...], optional
+        One offset per time step (gridded) or window (tabular), measured from the samples'
+        reference time; shared by every sample. ``None`` when unknown.
+    reference_date : list[datetime.datetime], optional
+        One absolute reference date per sample, so ``reference_date[b] + time_offsets[t]``
+        is the time of step ``t`` of sample ``b``. ``None`` when unknown.
     """
 
     name: str
@@ -159,6 +173,8 @@ class Source(ABC):
     layout: TensorLayout
     statistics: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    time_offsets: TimeOffsets | None = None
+    reference_date: list[datetime.datetime] | None = None
     _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
 
     # Tensor fields, besides ``coordinates``, that :meth:`to` moves and :meth:`pin_memory` pins.
@@ -182,6 +198,11 @@ class Source(ABC):
             raise ValueError(msg)
 
         object.__setattr__(self, "_name_to_index", {name: idx for idx, name in enumerate(self.variables)})
+        _normalise_time_fields(self)
+
+    def _check_time_fields(self) -> None:
+        """Check the time information against the data; called by subclasses once their payload is checked."""
+        _check_time_fields(self)
 
     @property
     @abstractmethod
@@ -257,6 +278,8 @@ class Source(ABC):
             "layout": self.layout,
             "statistics": self.statistics,
             "metadata": self.metadata,
+            "time_offsets": self.time_offsets,
+            "reference_date": self.reference_date,
         }
 
     def _select_variable_metadata(self, indices: Sequence[int] | torch.Tensor | slice) -> dict[str, Any]:
@@ -287,6 +310,17 @@ class Source(ABC):
                 msg = f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
                 raise ValueError(msg)
         return source
+
+    def shift_time_reference(self, delta: datetime.timedelta) -> "Source":
+        """Return the same data with its times measured from a reference moved on by ``delta``.
+
+        The time offsets drop by ``delta`` and the reference dates advance by it, so the
+        absolute time of every step is unchanged. Tabular sources also shift their point
+        timedeltas. Used when a task moves its reference time, e.g. on each rollout step.
+        """
+        if not delta:
+            return self
+        return self.clone(**_shifted_time_fields(self, delta))
 
     def to(
         self,
@@ -559,6 +593,12 @@ class BaseTemplate(ABC):
         Free-form per-source metadata, passed on to the built source. Kept unchanged by
         :meth:`select_variables` and :meth:`with_variables`: per-variable entries are the
         caller's to update.
+    time_offsets : tuple[datetime.timedelta, ...], optional
+        One offset per time step (gridded) or window (tabular), measured from the samples'
+        reference time; shared by every sample. ``None`` when unknown.
+    reference_date : list[datetime.datetime], optional
+        One absolute reference date per sample, so ``reference_date[b] + time_offsets[t]``
+        is the time of step ``t`` of sample ``b``. ``None`` when unknown.
     """
 
     name: str
@@ -566,11 +606,24 @@ class BaseTemplate(ABC):
     layout: TensorLayout
     statistics: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    time_offsets: TimeOffsets | None = None
+    reference_date: list[datetime.datetime] | None = None
 
     def __post_init__(self) -> None:
         if self.variables is None or len(set(self.variables)) != len(self.variables):
             msg = f"{self.__class__.__name__} {self.name!r} requires unique variable names."
             raise ValueError(msg)
+        _normalise_time_fields(self)
+        _check_time_fields(self)
+
+    def shift_time_reference(self, delta: datetime.timedelta) -> "BaseTemplate":
+        """Return the same nodes with their times measured from a reference moved on by ``delta``.
+
+        See :meth:`Source.shift_time_reference`.
+        """
+        if not delta:
+            return self
+        return replace(self, **_shifted_time_fields(self, delta))
 
     @property
     def n_variables(self) -> int:
@@ -585,6 +638,8 @@ class BaseTemplate(ABC):
             "layout": self.layout,
             "statistics": self.statistics,
             "metadata": self.metadata,
+            "time_offsets": self.time_offsets,
+            "reference_date": self.reference_date,
         }
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "BaseTemplate":
@@ -649,3 +704,43 @@ class BaseTemplate(ABC):
         The source's variables, statistics and metadata are the template's.
         """
         ...
+
+
+def _normalise_time_fields(obj: Source | BaseTemplate) -> None:
+    """Convert ``time_offsets`` and ``reference_date`` of a frozen source or template to plain datetimes."""
+    object.__setattr__(obj, "time_offsets", as_time_offsets(obj.time_offsets))
+    object.__setattr__(obj, "reference_date", as_reference_dates(obj.reference_date))
+
+
+def _check_time_fields(obj: Source | BaseTemplate) -> None:
+    """Raise unless the time offsets match the time size and the reference dates the batch size."""
+    owner = f"{obj.__class__.__name__} {obj.name!r}"
+    if obj.time_offsets is not None:
+        check_time_offsets(owner, obj.time_offsets, obj.time_size)
+    if obj.reference_date is not None and len(obj.reference_date) != obj.batch_size:
+        msg = f"{owner} has {obj.batch_size} samples but {len(obj.reference_date)} reference dates."
+        raise ValueError(msg)
+
+
+def _shifted_time_fields(obj: Source | BaseTemplate, delta: datetime.timedelta) -> dict[str, Any]:
+    """Return the time fields of ``obj`` re-measured from a reference moved on by ``delta``."""
+    fields = {
+        "time_offsets": shift_time_offsets(obj.time_offsets, delta),
+        "reference_date": shift_reference_dates(obj.reference_date, delta),
+    }
+    timedeltas = getattr(obj, "timedeltas", None)
+    if timedeltas is not None:
+        seconds = delta.total_seconds()
+        fields["timedeltas"] = [t - seconds for t in timedeltas]
+    return fields
+
+
+def time_tree_lines(obj: Source | BaseTemplate) -> list[str]:
+    """Return the lines describing the time information of ``obj`` in a :meth:`Source.tree`."""
+    lines = []
+    if obj.time_offsets is not None:
+        lines.append(f"Time offsets: {format_time_offsets(obj.time_offsets)}")
+    if obj.reference_date is not None:
+        dates = ", ".join("?" if d is None else d.isoformat() for d in obj.reference_date)
+        lines.append(f"Reference dates: [{dates}]")
+    return lines

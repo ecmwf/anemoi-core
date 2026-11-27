@@ -22,6 +22,8 @@ from anemoi.models.data.sample.base import BaseSample
 from anemoi.models.data.sample.base import host_float32
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.sources import TabularTemplate
+from anemoi.models.data.time import as_time_offsets
+from anemoi.models.data.time import check_time_offsets
 from anemoi.models.distributed.shapes import ShardSizes
 
 
@@ -38,8 +40,8 @@ class TabularSample(BaseSample):
     timedeltas : torch.Tensor
         ``(N,)`` time offset of each point, in seconds.
     boundaries : tuple[slice, ...]
-        One slice per time window along the grid axis. This is the only record of
-        the sample's time axis.
+        One slice per time window along the grid axis. The windows' times are given by
+        :attr:`time_offsets`.
     shard_sizes : list[ShardSizes], optional
         Read-time sharding descriptor, one per time window.
     """
@@ -52,8 +54,16 @@ class TabularSample(BaseSample):
     template_type: ClassVar[type[TabularTemplate]] = TabularTemplate
     REQUIRED_AXES: ClassVar[tuple[str, ...]] = ("grid", "variables")
     OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ("ensemble",)
-    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
-    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("coordinates", "timedeltas", "boundaries", "shard_sizes")
+    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = (
+        "reference_date",
+        "coordinates",
+        "timedeltas",
+        "boundaries",
+        "shard_sizes",
+    )
+    # Unsharded samples collate to ``shard_sizes=None``: :class:`TabularSource` reads that as
+    # replicated, whereas a list of ``None`` entries would wrongly read as sharded.
+    _OPTIONAL_DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("reference_date", "shard_sizes")
 
     def __post_init__(self) -> None:
         if self.layout.has_axis("time") or self.layout.has_axis("batch"):
@@ -62,22 +72,32 @@ class TabularSample(BaseSample):
                 f"given by 'boundaries' and the batch is a list. Got {self.layout!r}."
             )
             raise ValueError(msg)
+        # No zero-argument super(): slots=True rebuilds the class, which breaks it.
+        BaseSample.__post_init__(self)
 
-    def with_time_offsets(self, window_offsets: Sequence[float]) -> Self:
-        """Return the sample with each window's timedeltas shifted by that window's offset, in seconds.
+    @property
+    def time_size(self) -> int:
+        """Number of time windows, taken from :attr:`boundaries`."""
+        return len(self.boundaries)
 
-        Moves timedeltas measured from each window's own date onto a common reference time.
+    def with_time_reference(self, reference_date: Any, time_offsets: Sequence[Any]) -> Self:
+        """Return the sample with its windows placed at ``reference_date + time_offsets``.
+
+        The point timedeltas the reader gives are measured from each window's own date; they are
+        shifted by that window's offset, so they are measured from the reference time too and an
+        earlier window has more negative timedeltas than a later one.
         """
-        if len(window_offsets) != len(self.boundaries):
-            msg = (
-                f"{self.__class__.__name__} has {len(self.boundaries)} time windows, "
-                f"but {len(window_offsets)} window offsets were given."
-            )
-            raise ValueError(msg)
+        offsets = as_time_offsets(time_offsets)
+        check_time_offsets(self.__class__.__name__, offsets, self.time_size)
         shift = torch.zeros_like(self.timedeltas)
-        for window, offset in zip(self.boundaries, window_offsets, strict=True):
-            shift[window] = offset
-        return replace(self, timedeltas=self.timedeltas + shift)
+        for window, offset in zip(self.boundaries, offsets, strict=True):
+            shift[window] = offset.total_seconds()
+        return replace(
+            self,
+            reference_date=reference_date,
+            time_offsets=offsets,
+            timedeltas=self.timedeltas + shift,
+        )
 
     @classmethod
     def _collate_layout(cls, layout: TensorLayout) -> TensorLayout:
@@ -88,25 +108,6 @@ class TabularSample(BaseSample):
     def _collate_data(cls, samples: Sequence[Self]) -> list[torch.Tensor]:
         """Collate the per-sample data tensors into a list of tensors."""
         return [s.values for s in samples]
-
-    @classmethod
-    def _collate_dynamic_attrs(cls, samples: Sequence[Self]) -> dict[str, Any]:
-        """Keep one value per sample, collapsing unsharded ``shard_sizes`` to ``None``.
-
-        :class:`TabularSource` treats ``shard_sizes is None`` as replicated, so a list of
-        ``None`` entries would wrongly read as sharded. A mix of sharded and unsharded
-        samples cannot be gathered consistently and is rejected.
-        """
-        # No zero-argument super(): slots=True rebuilds the class, which breaks it.
-        attrs = {attr: [getattr(s, attr) for s in samples] for attr in cls._DYNAMIC_ATTRS}
-        shard_sizes = attrs["shard_sizes"]
-        n_unsharded = sum(sizes is None for sizes in shard_sizes)
-        if n_unsharded == len(shard_sizes):
-            attrs["shard_sizes"] = None
-        elif n_unsharded:
-            msg = f"The batch mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
-            raise ValueError(msg)
-        return attrs
 
     @classmethod
     def from_validated(
@@ -134,6 +135,7 @@ class TabularSample(BaseSample):
         shard_sizes: list[ShardSizes] | None = None,
         batch_size: int = 1,
         time_size: int | None = None,
+        reference_date: Any = None,
         **common: Any,
     ) -> TabularTemplate:
         """Build a :class:`TabularTemplate` whose ``batch_size`` samples all share this geometry.
@@ -152,6 +154,7 @@ class TabularSample(BaseSample):
             timedeltas=[timedeltas] * batch_size,
             boundaries=[boundaries] * batch_size,
             shard_sizes=None if shard_sizes is None else [shard_sizes] * batch_size,
+            reference_date=None if reference_date is None else [reference_date] * batch_size,
         )
 
     @staticmethod

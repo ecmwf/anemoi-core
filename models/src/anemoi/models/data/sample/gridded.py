@@ -62,13 +62,28 @@ class GriddedSample(BaseSample):
     template_type: ClassVar[type[GriddedTemplate]] = GriddedTemplate
     REQUIRED_AXES: ClassVar[tuple[str, ...]] = ("time", "grid", "variables")
     OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ("ensemble",)
-    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics", "coordinates", "shard_sizes")
-    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
+    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = (
+        "variables",
+        "statistics",
+        "time_offsets",
+        "coordinates",
+        "shard_sizes",
+    )
+    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("reference_date",)
 
     def __post_init__(self) -> None:
         if not self.layout.has_axis("time"):
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
+        # No zero-argument super(): slots=True rebuilds the class, which breaks it.
+        BaseSample.__post_init__(self)
+
+    @property
+    def time_size(self) -> int | None:
+        """Number of time steps, or ``None`` without data."""
+        if self.values is None:
+            return None
+        return self.values.shape[self.layout.axis("time", ndim=self.values.ndim)]
 
     @classmethod
     def _collate_layout(cls, layout: TensorLayout) -> TensorLayout:

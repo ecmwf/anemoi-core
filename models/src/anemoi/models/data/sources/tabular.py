@@ -23,6 +23,8 @@ from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
+from anemoi.models.data.sources.base import time_tree_lines
+from anemoi.models.data.time import select_time_offsets
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.noise import draw_noise
 from anemoi.models.distributed.shapes import ShardSizes
@@ -152,6 +154,8 @@ class TabularSource(Source):
         if self.values and any(sample.dtype != self.values[0].dtype for sample in self.values):
             msg = f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample."
             raise ValueError(msg)
+
+        self._check_time_fields()
 
     @property
     def grid_size(self) -> None:
@@ -505,11 +509,10 @@ class TabularSource(Source):
         Parameters
         ----------
         indices : int, slice, or sequence of int
-            Positions along the logical *time* axis. For gridded datasets
-            this indexes ``layout.time`` directly. For sparse observation
-            datasets it picks the corresponding boundary slices from
-            ``boundaries`` (per sample), updating data, coordinates,
-            timedeltas and the boundary list consistently.
+            Positions along the logical *time* axis. Picks the corresponding
+            boundary slices from ``boundaries`` (per sample), updating data,
+            coordinates, timedeltas, the boundary list and ``time_offsets``
+            consistently. Times stay measured from the same reference time.
 
         Returns
         -------
@@ -561,13 +564,15 @@ class TabularSource(Source):
             timedeltas=new_timedeltas,
             boundaries=new_boundaries,
             shard_sizes=new_shard_sizes,
+            time_offsets=select_time_offsets(self.time_offsets, idx_list),
         )
 
     def concat_time(self, *others: "TabularSource") -> "TabularSource":
         """Return a new view with the time windows of ``others`` appended after this source's.
 
         Sample by sample, data, coordinates and timedeltas are concatenated along the node axis,
-        and the window boundaries and shard sizes are extended accordingly.
+        and the window boundaries, shard sizes and time offsets are extended accordingly. The
+        sources must share their reference dates, so their times are measured from the same reference.
 
         Parameters
         ----------
@@ -590,6 +595,8 @@ class TabularSource(Source):
                 "layout": (self.layout, other.layout),
                 "ensemble size": (self.ensemble_size, other.ensemble_size),
                 "sharding": (self.shard_sizes is None, other.shard_sizes is None),
+                "reference dates": (self.reference_date, other.reference_date),
+                "time offsets known": (self.time_offsets is None, other.time_offsets is None),
             }
             mismatch = {key: values for key, values in mismatch.items() if values[0] != values[1]}
             if mismatch:
@@ -621,6 +628,9 @@ class TabularSource(Source):
             timedeltas=new_timedeltas,
             boundaries=new_boundaries,
             shard_sizes=new_shard_sizes,
+            time_offsets=(
+                None if self.time_offsets is None else tuple(o for source in sources for o in source.time_offsets)
+            ),
         )
 
     def tree(self, prefix: str = "") -> Tree:
@@ -655,6 +665,9 @@ class TabularSource(Source):
                     tree.add(f"\tSample {i + 1}: {sample.shape[axis]} <- {' + '.join(time_slice_lengths)}")
             else:
                 tree.add(f"Dim {axis + 1} ({name}): {self.values[0].shape[axis]}")
+
+        for line in time_tree_lines(self):
+            tree.add(line)
 
         return tree
 

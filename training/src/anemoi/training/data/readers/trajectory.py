@@ -100,6 +100,12 @@ class TrajectoryDataReader(GriddedDataReader):
             base_dates=base_dates,
         )
 
+    def step_dates(self, sequence: int, positions: TimeIndices) -> np.ndarray:
+        """Return the valid date ``base_date + step`` of each of steps ``positions`` of initialisation ``sequence``."""
+        base_date = np.asarray(self.data.base_dates).astype("datetime64[s]")[sequence]
+        steps = np.asarray(self.data.steps).astype("timedelta64[s]")
+        return base_date + steps[np.atleast_1d(np.arange(len(steps))[positions])]
+
     @property
     def frequency(self) -> datetime.timedelta:
         """Return the step frequency (spacing between consecutive forecast steps)."""

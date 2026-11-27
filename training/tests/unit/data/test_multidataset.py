@@ -34,7 +34,7 @@ class TestMultiDataset:
         reader.dates = list(range(num_dates))
         reader.frequency = "3h"
         reader.sampling = None
-        # Gridded samples carry no point times, so measuring them from the reference changes nothing.
+        # Measuring from the reference is the reader's job; it is tested with the readers.
         reader.measure_from_reference.side_effect = lambda sample, *_args: sample
 
         def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
@@ -73,7 +73,7 @@ class TestMultiDataset:
 
         for name, reader in multi_dataset.data_readers.items():
             reader.get_sample.assert_called_once_with(0, [11, 13, 17])
-            reader.measure_from_reference.assert_called_once_with(reader.get_sample.return_value, 11, [11, 13, 17])
+            reader.measure_from_reference.assert_called_once_with(reader.get_sample.return_value, 0, 11, [11, 13, 17])
             assert sample[name] is reader.get_sample.return_value
 
     def test_set_relative_date_indices_updates_contiguous_indices(self, multi_dataset: MultiDataset) -> None:

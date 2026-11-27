@@ -115,7 +115,9 @@ def create_batched_struct(
     **kwargs
         Arguments specific to the kind: ``grid_size`` (samples only) and ``shard_sizes``
         for gridded data; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)``
-        pairs) and ``shard_sizes`` for tabular data.
+        pairs) and ``shard_sizes`` for tabular data. Every kind also takes the optional
+        ``time_offsets`` (one ``datetime.timedelta`` or ``numpy.timedelta64`` per time step,
+        from the reference time) and ``reference_date`` (the absolute reference time).
         A template also needs the dataset ``name`` and the ``batch_size``,
         ``ensemble_size`` and ``time_size`` of the batch to decode. A tabular template
         repeats the geometry for each of the ``batch_size`` samples, and takes its time
