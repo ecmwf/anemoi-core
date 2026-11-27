@@ -31,6 +31,15 @@ class LeakyReluBoundingSchema(ReluBoundingSchema):
     "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
 
 
+class SigmoidBoundingSchema(ReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.SigmoidBounding"] = Field(..., alias="_target_")
+    "Sigmoid bounding object defined in anemoi.models.layers.bounding. Maps the variables to (min_val, max_val)."
+    min_val: float = 0.0
+    "The lower limit of the output range of the sigmoid."
+    max_val: float = 1.0
+    "The upper limit of the output range of the sigmoid."
+
+
 class FractionBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
     "Fraction bounding object defined in anemoi.models.layers.bounding."
@@ -94,6 +103,7 @@ BoundingSchema = Annotated[
     Union[
         ReluBoundingSchema,
         LeakyReluBoundingSchema,
+        SigmoidBoundingSchema,
         FractionBoundingSchema,
         LeakyFractionBoundingSchema,
         HardtanhBoundingSchema,

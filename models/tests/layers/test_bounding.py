@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 import torch
 from hydra.utils import instantiate
+from pydantic import TypeAdapter
+from pydantic import ValidationError
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
@@ -23,8 +25,11 @@ from anemoi.models.layers.bounding import LeakyReluBounding
 from anemoi.models.layers.bounding import NormalizedLeakyReluBounding
 from anemoi.models.layers.bounding import NormalizedReluBounding
 from anemoi.models.layers.bounding import ReluBounding
+from anemoi.models.layers.bounding import SigmoidBounding
 from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.schemas.bounding import BoundingSchema
+from anemoi.models.schemas.bounding import SigmoidBoundingSchema
 from anemoi.utils.config import DotDict
 
 
@@ -100,6 +105,63 @@ def test_relu_bounding(config, source):
     assert torch.equal(output, expected_output)
 
 
+def test_sigmoid_bounding(config, source, input_tensor):
+    bounding = SigmoidBounding(variables=config.variables)
+    output = _to_2d(bounding(source))
+    expected_output = input_tensor.clone()
+    expected_output[..., :2] = torch.sigmoid(input_tensor[..., :2])
+    # defaults (0, 1) are identical to a plain sigmoid
+    assert torch.equal(output, expected_output)
+    # bounded variables are strictly inside (0, 1), unbounded ones are untouched
+    assert ((output[..., :2] > 0.0) & (output[..., :2] < 1.0)).all()
+    assert torch.equal(output[..., 2], input_tensor[..., 2])
+
+
+def test_sigmoid_bounding_custom_range(config, source, input_tensor):
+    minimum, maximum = -2.0, 3.0
+    bounding = SigmoidBounding(variables=config.variables, min_val=minimum, max_val=maximum)
+    output = _to_2d(bounding(source))
+    expected_output = input_tensor.clone()
+    expected_output[..., :2] = minimum + (maximum - minimum) * torch.sigmoid(input_tensor[..., :2])
+    assert torch.allclose(output, expected_output)
+    # bounded variables are strictly inside (min_val, max_val), unbounded ones are untouched
+    assert ((output[..., :2] > minimum) & (output[..., :2] < maximum)).all()
+    assert torch.equal(output[..., 2], input_tensor[..., 2])
+
+
+def test_sigmoid_bounding_schema():
+    adapter = TypeAdapter(BoundingSchema)
+    schema = adapter.validate_python(
+        {"_target_": "anemoi.models.layers.bounding.SigmoidBounding", "variables": ["var1"]}
+    )
+    assert isinstance(schema, SigmoidBoundingSchema)
+    assert schema.variables == ["var1"]
+    assert schema.min_val == 0.0
+    assert schema.max_val == 1.0
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"_target_": "anemoi.models.layers.bounding.SigmoidBounding"})
+
+    schema = adapter.validate_python(
+        {
+            "_target_": "anemoi.models.layers.bounding.SigmoidBounding",
+            "variables": ["var1"],
+            "min_val": -2.0,
+            "max_val": 3.0,
+        }
+    )
+    assert isinstance(schema, SigmoidBoundingSchema)
+    assert schema.min_val == -2.0
+    assert schema.max_val == 3.0
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "_target_": "anemoi.models.layers.bounding.SigmoidBounding",
+                "variables": ["var1"],
+                "min_val": "not-a-number",
+            }
+        )
+
+
 def test_normalized_relu_bounding(config, source):
     min_val = [2.0, 2.0]
     normalizer = ["mean-std", "min-max"]
@@ -161,6 +223,10 @@ def test_hydra_instantiate_bounding(config, source):
         },
         {
             "_target_": "anemoi.models.layers.bounding.LeakyReluBounding",
+            "variables": config.variables,
+        },
+        {
+            "_target_": "anemoi.models.layers.bounding.SigmoidBounding",
             "variables": config.variables,
         },
         {
@@ -299,6 +365,8 @@ def test_normalized_leaky_relu_bounding(config, source):
     [
         (ReluBounding, {}),
         (LeakyReluBounding, {}),
+        (SigmoidBounding, {}),
+        (SigmoidBounding, {"min_val": -1.0, "max_val": 1.0}),
         (HardtanhBounding, {"min_val": -1.0, "max_val": 1.0}),
         (LeakyHardtanhBounding, {"min_val": -1.0, "max_val": 1.0}),
         (FractionBounding, {"min_val": 0.0, "max_val": 1.0, "total_var": "total_var"}),
