@@ -919,7 +919,8 @@ exact, and ``highest`` keeps them in full float32.
 
 ``cufft_plan_cache_size`` sets how many cuFFT plans PyTorch keeps on each GPU. When it is unset, the current limit,
 normally 4096, stays unchanged. Native ring FFTs on reduced grids need one plan per ring length, direction and
-batch shape.
+batch shape. For runs at high resolution, the notes on memory and speed of the wavelet energy score in
+:doc:`../modules/losses` give more detail.
 
 ******************
  Weight Averaging

@@ -386,6 +386,7 @@ compilation:
 -  anemoi.models.layers.normalization.ConditionalLayerNorm (when using
    the ensemble model)
 -  torch.nn.LayerNorm
+-  anemoi.training.losses.WaveletEnergyScoreLoss
 
 Compiling can also decrease the peak memory required by fusing multiple
 functions into a single one which reduces the intermediate activations

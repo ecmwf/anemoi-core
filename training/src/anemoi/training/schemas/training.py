@@ -387,6 +387,60 @@ class GraphEdgeEnergyScoreLossSchema(GraphScoreLossSchema):
     fair: bool = True
 
 
+class WaveletEnergyScoreLossSchema(EnsembleScoreLossSchema):
+    """Energy score of the local structure at wavelet scales, see ``WaveletEnergyScoreLoss``."""
+
+    target_: Literal["anemoi.training.losses.WaveletEnergyScoreLoss"] = Field(..., alias="_target_")
+    transform: Literal["reduced_sht", "octahedral_sht", "regular_sht"]
+    "Layout of the data grid. All layouts use Gaussian latitudes."
+    fft_backend: Literal["ring", "padded"] = "ring"
+    "FFTs on reduced grids, with 'ring' for native FFTs grouped by ring length and 'padded' for padded FFTs."
+    use_graphed_rfft: bool = False
+    "Capture the native forward FFTs in CUDA graphs. This cannot be combined with the padded backend."
+    use_graphed_irfft: bool = False
+    "Capture the native inverse FFTs in CUDA graphs. This cannot be combined with the padded backend."
+    scale_weights: list[NonNegativeFloat]
+    "Weight of each wavelet scale, starting from the largest. Scales with weight 0 are not computed."
+    truncation: PositiveInt | None = None
+    "Highest degree. Defaults to nlat // 2 - 1."
+    smoothing_octaves: NonNegativeInt = 3
+    "Number of octaves below its own scale at which each structure tensor is smoothed."
+    direction_floor: float = Field(default=0.01, gt=0.0)
+    "Floor under the local energy in the direction entries, relative to the mean energy of the field."
+    fair: bool = True
+    "Use the fair, unbiased energy score."
+    grid: Literal["n320", "N320"] | None = None
+    "Name of the reduced Gaussian grid for ``reduced_sht``."
+    nlat: PositiveInt | None = None
+    "Number of latitudes for ``octahedral_sht`` and ``regular_sht``."
+    nlon: PositiveInt | None = None
+    "Number of longitudes for ``regular_sht``. Defaults to 2 * nlat."
+    checkpoint_scales: bool = False
+    "Recompute each scale in the backward pass, which lowers the peak memory and takes longer."
+    variables_per_checkpoint: PositiveInt | None = None
+    "Recompute each group of this many variables of each scale in the backward pass. This includes"
+    " ``checkpoint_scales``."
+    ignore_nans: Literal[False] = False
+    "The transforms cannot handle missing values."
+    no_autocast: Literal[True] = True
+    "The transforms and the score run with autocast off, in float32 or float64. For more accurate gradients, set"
+    " training.float32_matmul_precision: highest."
+
+    @model_validator(mode="after")
+    def check_scales_and_grid(self) -> Self:
+        if self.fft_backend == "padded" and (self.use_graphed_rfft or self.use_graphed_irfft):
+            msg = "CUDA graphs require fft_backend='ring'"
+            raise ValueError(msg)
+        if not any(weight > 0.0 for weight in self.scale_weights):
+            msg = "WaveletEnergyScoreLoss needs at least one scale weight above 0."
+            raise ValueError(msg)
+        needs = {"reduced_sht": "grid", "octahedral_sht": "nlat", "regular_sht": "nlat"}[self.transform]
+        if getattr(self, needs) is None:
+            msg = f"WaveletEnergyScoreLoss with transform '{self.transform}' needs '{needs}'."
+            raise ValueError(msg)
+        return self
+
+
 class MultiscaleConfigDiskSchema(BaseModel):
     """File-based multiscale config: smoothing matrices loaded from .npz files."""
 
@@ -652,6 +706,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.WaveletEnergyScoreLoss": "wavelet_energy_score",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -684,6 +739,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
+            | Annotated[WaveletEnergyScoreLossSchema, Tag("wavelet_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
@@ -744,6 +800,7 @@ LossSchemas = Annotated[
     | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
+    | Annotated[WaveletEnergyScoreLossSchema, Tag("wavelet_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],

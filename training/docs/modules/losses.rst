@@ -100,6 +100,9 @@ The following probabilistic loss functions are available by default:
    inside it. With step weights that sum to one, an error that is the same
    at every step gives the same score as scoring each step separately and
    averaging.
+-  ``WaveletEnergyScoreLoss``: Energy score of the local amount and
+   direction of structure at wavelet scales, described below. Requires a
+   gridded Gaussian source; tabular observations are not supported.
 
 The config for these loss functions is the same as for the
 deterministic:
@@ -118,6 +121,151 @@ deterministic:
 The ensemble examples below use the standard global ensemble scaler set. Adapt
 the list when the selected training scaler configuration defines different
 scalers.
+
+Wavelet energy score
+====================
+
+``WaveletEnergyScoreLoss`` rewards the right amount of structure at each
+scale around each point, lined up the right way, and tolerates small shifts
+in the position of each crest. The docstrings of ``WaveletEnergyScoreLoss``
+and ``RieszStructureTensor`` describe how it is computed.
+
+The fields are split into dyadic wavelet scales by degree ``l``, where
+scale ``j`` covers ``2^(j - 1) < l < 2^(j + 1)``. ``scale_weights`` holds
+one weight per scale, starting from the largest, and scales with weight 0
+are not computed. The finest scale lies mostly beyond the truncation and
+should be given weight 0.
+
+The transforms and the score run with autocast switched off, in float32, or
+in float64 for float64 fields, and half-precision fields are promoted to
+float32. For more accurate gradients, the matrix products can run in full
+float32 with ``training.float32_matmul_precision: highest``. With the
+default ``high``, which uses TF32, the gradient is less exact, and its error
+depends on how many fields go through a transform together.
+
+The transforms need the whole grid, which must be a Gaussian grid, given as
+``octahedral_sht`` with ``nlat``, ``reduced_sht`` with ``grid: n320``, or
+``regular_sht`` with ``nlat`` and optionally ``nlon``. The fields must have
+no missing values, and variables with missing values should be left out of
+this loss. A missing value in a scored field spreads through the transforms
+before scaling.
+
+The truncation defaults to ``nlat // 2 - 1``. The grid must hold the
+products of the finest scale with a weight above 0. With ``L`` the top
+degree of this scale and ``Ls`` its smoothing degree, ``2 (L + 1) + 5 Ls``
+must be at most ``2 nlat - 1`` and, on a regular grid, below ``nlon``.
+Other settings are rejected.
+
+For example, on O1280 (``nlat: 2560``, 12 scales up to T1279), scales 8 to
+10 cover ``128 < l <= 1279``, and scale 11 covers only ``1024 < l <= 1279``.
+The example uses the padded FFTs, which need only a few cuFFT plans, so the
+plan cache can keep PyTorch's default limit:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+            transform: octahedral_sht
+            nlat: 2560
+            fft_backend: padded
+            scale_weights: [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+            scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+Memory and speed
+----------------
+
+Two settings lower the peak memory by recomputing values during the backward
+pass, which takes longer:
+
+-  ``checkpoint_scales: true`` keeps the values of one scale at a time.
+-  ``variables_per_checkpoint: 8`` also splits the variables into groups of 8
+   and keeps the values of one group of one scale at a time. This setting
+   includes ``checkpoint_scales``. Each group adds a fixed time offset, so very
+   small groups are slow with many variables.
+
+Both settings are off by default, and training at low resolution should not
+need them.
+
+On reduced grids, the FFTs use native ring FFTs by default. The backend is
+selected in the loss configuration:
+
+.. code-block:: yaml
+
+   fft_backend: ring  # default; padded selects the padded FFTs
+   use_graphed_rfft: false
+   use_graphed_irfft: false
+
+The selection applies to the initial transform, to every smoothing transform
+and to the inverse transforms of the wavelet gradients. Regular grids use one
+batched native FFT.
+
+The two graph flags enable CUDA graph capture for the native forward and
+inverse ring FFTs independently, and both default to false. A capture is built
+on first use for each input configuration and keeps its buffers and memory
+pool. Different scale truncations, batch shapes and gradient requirements can
+create separate captures, and graphed FFTs do not support gradients of
+gradients. Replaying a graph after PyTorch's plan cache has freed one of its cuFFT
+plans is unsafe, so the cache should be large enough to keep all plans used
+during the run. The padded backend rejects both graph flags, and its packing
+operations can be compiled without CUDA graphs instead.
+
+Native FFTs need one cuFFT plan per ring length, direction and batch shape,
+and PyTorch keeps up to 4096 plans per GPU. Plans that do not fit are built
+again on every call, which can make a step many times slower. An octahedral
+grid has ``nlat / 2`` ring lengths, so at O1280 each batch shape and direction
+takes 1280 plans. The batch shapes differ between the prediction and the
+target, between the transforms inside the loss and between variable groups.
+One O1280 run with 4 variables and 2 members needed 11,520 plans and ran at
+full speed with a limit of 65,536. The limit for all GPUs of a run is set
+with:
+
+.. code-block:: yaml
+
+   training:
+     cufft_plan_cache_size: 65536
+
+In that run, each plan used about 0.1 MB of GPU memory, which is allocated as
+the plans are built. The limit applies to all FFTs in the process, including
+those of the model. When the limit is unset, PyTorch's limit stays as it is.
+
+Compilation fuses the products at the grid points and the score calculations.
+It is selected through ``model.compile``:
+
+.. code-block:: yaml
+
+   model:
+     compile:
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
+
+With ``fft_backend: padded``, compilation also fuses the FFT packing. The
+packing is compiled with its own settings, with varying shapes and without
+CUDA graphs. It belongs to the padded FFT that all transforms on the grid
+share within the process, so other padded losses and metrics on the same grid
+use the compiled packing as well.
+
+For example, on N320 (10 scales up to T319), with the grid-point work compiled
+and the checkpoints switched off:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+           transform: reduced_sht
+           grid: n320
+           scale_weights: [0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+           checkpoint_scales: false
+           variables_per_checkpoint: null
+           scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+   model:
+     compile:
+       # keep the modules your model config already lists
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
 
 ************************
  Combined Loss Functions
@@ -625,8 +773,9 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
    combined with ``fft_backend: padded``. The inverse transform wrappers accept
    the corresponding ``use_graphed_irfft`` flag. Native FFTs need one cuFFT
    plan per ring length, direction and batch shape, so at high resolution they
-   can need more plans than PyTorch keeps by default. Raise the limit with
-   ``training.cufft_plan_cache_size`` if necessary.
+   can need more plans than PyTorch keeps by default. The notes on memory and
+   speed of the wavelet energy score above explain how to raise the limit with
+   ``training.cufft_plan_cache_size``.
 
 .. note::
 
