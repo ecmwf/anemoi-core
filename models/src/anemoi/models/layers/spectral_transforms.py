@@ -15,6 +15,8 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from anemoi.models.layers.ring_fft import FFTBackend
+from anemoi.models.layers.ring_fft_base import empty_transform
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import LatitudeGrid
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
@@ -229,8 +231,11 @@ class FFT2D(Cartesian2DTransform):
     ) -> torch.Tensor:
 
         data = self.prepare_for_fft(data)
+        complex_dtype = torch.promote_types(data.dtype, torch.complex64)
 
         if self.patch_size is None:
+            if data.numel() == 0:
+                return empty_transform(data, data.shape, complex_dtype)
             fft = torch.fft.fft2(data, dim=(-2, -3))
             if self.apply_filter:
                 fft *= self.filter.to(device=data.device, dtype=data.dtype)
@@ -240,6 +245,13 @@ class FFT2D(Cartesian2DTransform):
         stride_y, stride_x = self.patch_stride
         lead_shape = data.shape[:-3]
         var = data.shape[-1]
+        padded_y = self.y_dim + self.patch_pad_y
+        padded_x = self.x_dim + self.patch_pad_x
+        n_patches_y = (padded_y - patch_y) // stride_y + 1
+        n_patches_x = (padded_x - patch_x) // stride_x + 1
+        if data.numel() == 0:
+            shape = (*lead_shape, n_patches_y, n_patches_x, patch_y, patch_x, var)
+            return empty_transform(data, shape, complex_dtype)
         flat = data.reshape(-1, self.y_dim, self.x_dim, var)
         flat = einops.rearrange(flat, "n y x v -> n v y x")
         if self.patch_pad_y > 0 or self.patch_pad_x > 0:
@@ -249,11 +261,6 @@ class FFT2D(Cartesian2DTransform):
         n_patches = unfolded.shape[-1]
         patches = unfolded.transpose(1, 2).reshape(-1, n_patches, var, patch_y, patch_x)
         fft = torch.fft.fft2(patches, dim=(-2, -1))
-
-        padded_y = self.y_dim + self.patch_pad_y
-        padded_x = self.x_dim + self.patch_pad_x
-        n_patches_y = (padded_y - patch_y) // stride_y + 1
-        n_patches_x = (padded_x - patch_x) // stride_x + 1
         fft = fft.reshape(*lead_shape, n_patches_y, n_patches_x, var, patch_y, patch_x)
         fft = einops.rearrange(fft, "... py px v y x -> ... py px y x v")
         if self.apply_filter:
@@ -286,7 +293,7 @@ class DCT2D(Cartesian2DTransform):
             x=self.x_dim,
             y=self.y_dim,
         )
-        x = dct_2d(x)
+        x = empty_transform(x, x.shape, x.dtype) if x.numel() == 0 else dct_2d(x)
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
@@ -337,6 +344,8 @@ class RegularSHT(SHT):
         truncation: int | None = None,
         nlon: int | None = None,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        fft_backend: FFTBackend = "ring",
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a regular lon-lat grid.
@@ -346,9 +355,13 @@ class RegularSHT(SHT):
         nlat : int
             Number of latitudes in the regular grid.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Highest degree. Defaults to min(nlat // 2 - 1, (nlon - 1) // 2).
         nlon : int | None
             Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm on reduced grids. Regular grids always use a batched native FFT.
+        use_graphed_rfft : bool
+            Capture the native reduced-grid FFTs in CUDA graphs. Defaults to False.
         latitude_grid : {"legendre-gauss", "equiangular-poles"}
             Latitude sampling, north to south. Equiangular rows include both poles:
             latitude[j] = 90 - j * 180 / (nlat - 1).
@@ -365,7 +378,11 @@ class RegularSHT(SHT):
             raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation,
+            latitude_grid=latitude_grid,
+            fft_backend=fft_backend,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -387,6 +404,7 @@ class ReducedSHT(SHT):
         self,
         grid: str,
         truncation: int | None = None,
+        fft_backend: FFTBackend = "ring",
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -397,10 +415,11 @@ class ReducedSHT(SHT):
         grid : str
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Highest degree. Defaults to nlat // 2 - 1.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm. The default "ring" uses native FFTs grouped by ring length.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Capture the native ring FFTs in CUDA graphs. Defaults to False.
         """
         super().__init__()
 
@@ -431,6 +450,7 @@ class ReducedSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            fft_backend=fft_backend,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -453,6 +473,7 @@ class OctahedralSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
+        fft_backend: FFTBackend = "ring",
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -461,12 +482,13 @@ class OctahedralSHT(SHT):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
-            on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. Must be even.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Highest degree. Defaults to nlat // 2 - 1.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm. The default "ring" uses native FFTs grouped by ring length.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            Capture the native ring FFTs in CUDA graphs. Defaults to False.
         """
         super().__init__()
         self.nlat = nlat
@@ -475,6 +497,7 @@ class OctahedralSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            fft_backend=fft_backend,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -510,6 +533,8 @@ class InverseRegularSHT(InverseSpectralTransform):
         truncation: int | None = None,
         nlon: int | None = None,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        fft_backend: FFTBackend = "ring",
+        use_graphed_irfft: bool = False,
         **kwargs,
     ) -> None:
         """Initialize InverseRegularSHT.
@@ -519,9 +544,13 @@ class InverseRegularSHT(InverseSpectralTransform):
         nlat : int
             Number of latitudes.
         truncation : int | None
-            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+            Highest degree. Defaults to min(nlat // 2 - 1, (nlon - 1) // 2).
         nlon : int | None
             Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm on reduced grids. Regular grids always use a batched native FFT.
+        use_graphed_irfft : bool
+            Capture the native reduced-grid FFTs in CUDA graphs. Defaults to False.
         latitude_grid : {"legendre-gauss", "equiangular-poles"}
             Latitude sampling, north to south. Equiangular rows include both poles:
             latitude[j] = 90 - j * 180 / (nlat - 1).
@@ -540,7 +569,11 @@ class InverseRegularSHT(InverseSpectralTransform):
             raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation,
+            latitude_grid=latitude_grid,
+            fft_backend=fft_backend,
+            use_graphed_irfft=use_graphed_irfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -554,6 +587,7 @@ class InverseReducedSHT(InverseSpectralTransform):
         self,
         grid: str,
         truncation: int | None = None,
+        fft_backend: FFTBackend = "ring",
         use_graphed_irfft: bool = False,
         **kwargs,
     ) -> None:
@@ -564,10 +598,11 @@ class InverseReducedSHT(InverseSpectralTransform):
         grid : str
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Highest degree. Defaults to nlat // 2 - 1.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm. The default "ring" uses native FFTs grouped by ring length.
         use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Capture the native ring FFTs in CUDA graphs. Defaults to False.
         """
         super().__init__()
 
@@ -598,6 +633,7 @@ class InverseReducedSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            fft_backend=fft_backend,
             use_graphed_irfft=use_graphed_irfft,
         )
 
@@ -612,6 +648,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self,
         nlat: int,
         truncation: int | None = None,
+        fft_backend: FFTBackend = "ring",
         use_graphed_irfft: bool = False,
         **kwargs,
     ) -> None:
@@ -622,10 +659,11 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         nlat : int
             Number of latitudes.
         truncation : int | None
-            Spectral truncation. Defaults to nlat // 2 - 1.
+            Highest degree. Defaults to nlat // 2 - 1.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm. The default "ring" uses native FFTs grouped by ring length.
         use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Capture the native ring FFTs in CUDA graphs. Defaults to False.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -636,6 +674,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            fft_backend=fft_backend,
             use_graphed_irfft=use_graphed_irfft,
         )
 

@@ -182,12 +182,12 @@ class SpectralLoss(BaseLoss):
             self.transform = RegularSHT(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
-            # optional args: truncation, use_graphed_rfft
+            # optional args: truncation, fft_backend, use_graphed_rfft
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: nlat
-            # optional args: truncation, use_graphed_rfft
+            # optional args: truncation, fft_backend, use_graphed_rfft
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:
@@ -737,6 +737,9 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
 
     For spherical harmonic transforms, coefficients with ``m > 0`` are counted twice to account
     for ``-m``, and the unused entries with ``m > l`` are ignored.
+
+    ``no_autocast`` switches autocast off for the transform and the CRPS of the coefficients. The spherical
+    harmonic transforms run with autocast off in any case, in float32 or float64.
     """
 
     def __init__(

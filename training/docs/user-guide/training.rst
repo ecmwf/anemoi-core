@@ -917,6 +917,10 @@ that run in float32, for example in losses that switch autocast off. It is one o
 default, or ``medium``. With ``high``, the products use TF32 where the GPU supports it, which is faster but less
 exact, and ``highest`` keeps them in full float32.
 
+``cufft_plan_cache_size`` sets how many cuFFT plans PyTorch keeps on each GPU. When it is unset, the current limit,
+normally 4096, stays unchanged. Native ring FFTs on reduced grids need one plan per ring length, direction and
+batch shape.
+
 ******************
  Weight Averaging
 ******************

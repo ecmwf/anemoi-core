@@ -140,6 +140,11 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         None,
         description="Variable names to exclude from spectral truncation (only used when truncate=True).",
     )
+    fft_backend: Literal["ring", "padded"] = Field(
+        "ring",
+        description='FFTs on an octahedral grid, with "ring" for native FFTs grouped by ring length and "padded" '
+        "for padded FFTs.",
+    )
 
 
 ResidualConnectionSchema = Annotated[
