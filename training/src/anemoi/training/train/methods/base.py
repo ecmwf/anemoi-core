@@ -35,6 +35,7 @@ from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.scaler_tensor import LossScaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
@@ -350,11 +351,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
             )
 
-        # Loss gradient scaling (arXiv:2306.06079, section 4.3.2) has been removed for now, to be revisited.
-        # The config key stays so existing configs validate; asking for it fails loudly.
-        if config.training.loss_gradient_scaling:
-            msg = "training.loss_gradient_scaling is temporarily unavailable; set it to false."
-            raise NotImplementedError(msg)
+        # Loss gradient scaling (arXiv:2306.06079, section 4.3.2): None when disabled.
+        self.loss_gradient_scaler = LossScaler.from_config(config.training.loss_gradient_scaling)
+        LOGGER.info("Loss gradient scaling: %s", self.loss_gradient_scaler or "disabled")
 
         self.is_first_step = True
 
@@ -927,7 +926,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 grid_shard_sizes=self._grid_shard_sizes(y),
             )
 
+        loss_gradient_scaler = getattr(self, "loss_gradient_scaler", None)
+        if loss_gradient_scaler is not None and torch.is_grad_enabled() and self._requires_grad(y_pred):
+            # The norms only need reducing over the model group while the prediction is still sharded.
+            y_pred = loss_gradient_scaler(y_pred, group=self.model_comm_group if self._is_sharded(y_pred) else None)
+
         return self._evaluate_loss(loss, y_pred, y, **loss_kwargs)
+
+    @staticmethod
+    def _requires_grad(source: Source) -> bool:
+        """Whether any payload tensor of ``source`` requires grad."""
+        values = source.values
+        return any(t.requires_grad for t in (values if isinstance(values, list) else [values]))
+
+    @staticmethod
+    def _is_sharded(source: Source) -> bool:
+        """Whether ``source`` is still sharded across the model group (gridded or per time window)."""
+        if source.is_tabular:
+            return source.is_sharded
+        return getattr(source, "shard_sizes", None) is not None
 
     def _compute_metrics(
         self,

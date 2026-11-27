@@ -22,6 +22,7 @@ from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
+from .scaler_tensor import LossScaler
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
@@ -43,6 +44,7 @@ __all__ = [
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
+    "LossScaler",
     "LossVariableMapper",
     "MAELoss",
     "MSELoss",
