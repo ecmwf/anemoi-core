@@ -10,11 +10,14 @@
 import numpy as np
 import pytest
 import torch
+from pydantic import TypeAdapter
+from pydantic import ValidationError
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.icosahedral_diamonds import IcosahedralDiamonds
 from anemoi.graphs.nodes import TriNodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.graphs.schemas.node_schemas import NodeBuilderSchemas
 
 
 @pytest.mark.parametrize("resolution", [0, 2])
@@ -61,3 +64,26 @@ def test_diamond_ordering():
 def test_unknown_ordering():
     with pytest.raises(ValueError, match="Unknown node ordering"):
         TriNodes(2, "test_nodes", ordering="random")
+
+
+@pytest.mark.parametrize("ordering", [None, "latlon", "diamonds"])
+def test_schema_accepts_ordering(ordering):
+    """The graph config schema accepts the node orderings of TriNodes."""
+    config = {"_target_": "anemoi.graphs.nodes.TriNodes", "resolution": 3}
+    if ordering is not None:
+        config["ordering"] = ordering
+    schema = TypeAdapter(NodeBuilderSchemas).validate_python(config)
+    assert schema.ordering == (ordering or "latlon")
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"_target_": "anemoi.graphs.nodes.TriNodes", "resolution": 3, "ordering": "random"},
+        {"_target_": "anemoi.graphs.nodes.HexNodes", "resolution": 3, "ordering": "diamonds"},
+    ],
+)
+def test_schema_refuses_bad_ordering(config):
+    """The schema refuses unknown orderings, and an ordering for HexNodes."""
+    with pytest.raises(ValidationError):
+        TypeAdapter(NodeBuilderSchemas).validate_python(config)

@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -112,3 +113,32 @@ def test_transformer_processor_accepts_fractional_mlp_hidden_ratio(transformer_p
 
     expected_hidden_dim = compute_mlp_hidden_dim(transformer_processor_init.num_channels, 2.67)
     assert processor.proc[0].mlp.mlp[0].out_features == expected_hidden_dim
+
+
+def _as_pickled_before_neighbourhood_attention(module: torch.nn.Module) -> torch.nn.Module:
+    """Remove the attributes that models pickled before neighbourhood attention do not have, then unpickle."""
+    for submodule in module.modules():
+        for name in ("rotary", "neighbourhood", "split"):
+            submodule.__dict__.pop(name, None)
+            submodule._modules.pop(name, None)
+    buffer = io.BytesIO()
+    torch.save(module, buffer)
+    buffer.seek(0)
+    return torch.load(buffer, weights_only=False)
+
+
+def test_processor_pickled_before_neighbourhood_attention_runs(transformer_processor, transformer_processor_init):
+    """A processor pickled before rotary embeddings and neighbourhood attention runs and gives the same output."""
+    gridsize = 100
+    x = torch.rand(gridsize, transformer_processor_init.num_channels)
+    shard_info = GraphShardInfo(nodes=[gridsize])
+    transformer_processor.eval()
+    expected = transformer_processor(x, 1, shard_info)
+
+    old = _as_pickled_before_neighbourhood_attention(transformer_processor)
+    assert "split" not in old.__dict__
+    assert "rotary" not in old.proc[0].attention._modules
+
+    torch.testing.assert_close(old(x, 1, shard_info), expected)
+    assert old.split is None
+    assert old.proc[0].attention.rotary is None

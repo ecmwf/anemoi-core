@@ -103,13 +103,17 @@ class LimitedAreaNPZFileNodesSchema(BaseModel):
 
 
 class IcosahedralandHealPixNodeSchema(BaseModel):
-    target_: Literal[
-        "anemoi.graphs.nodes.TriNodes",
-        "anemoi.graphs.nodes.HexNodes",
-    ] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.HexNodes",] = Field(..., alias="_target_")
     "Icosahedral nodes class implementations from anemoi.graphs.nodes."
     resolution: PositiveInt
     "Refinement level of the mesh."
+
+
+class TriNodeSchema(IcosahedralandHealPixNodeSchema):
+    target_: Literal["anemoi.graphs.nodes.TriNodes",] = Field(..., alias="_target_")
+    "Nodes of a refined icosahedron from anemoi.graphs.nodes."
+    ordering: Literal["latlon", "diamonds"] = "latlon"
+    "Order of the nodes. 'latlon' sorts them by latitude and longitude. 'diamonds' puts them in the diamond order that neighbourhood attention on the icosahedron needs. Defaults to 'latlon'."
 
 
 class HealPixNodeSchema(IcosahedralandHealPixNodeSchema):
@@ -159,6 +163,7 @@ NodeBuilderSchemas = Annotated[
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
     | IcosahedralandHealPixNodeSchema
+    | TriNodeSchema
     | HealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
     | StretchedIcosahdralNodeSchema,

@@ -147,6 +147,15 @@ class MultiHeadSelfAttention(nn.Module):
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
             self.k_norm = layer_kernels["KeyNorm"](self.head_dim)
 
+    def __setstate__(self, state: dict) -> None:
+        super().__setstate__(state)
+        # A model pickled before rotary embeddings and neighbourhood attention has neither attribute.
+        # Not class attributes: a class attribute "rotary" would hide the submodule of that name.
+        if "rotary" not in self._modules and "rotary" not in self.__dict__:
+            self.rotary = None
+        if "neighbourhood" not in self.__dict__:
+            self.neighbourhood = None
+
     def set_attention_function(self):
         attn_funcs = {
             "scaled_dot_product_attention": SDPAAttentionWrapper,

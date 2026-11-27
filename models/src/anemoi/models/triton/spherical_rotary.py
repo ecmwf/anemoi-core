@@ -56,15 +56,19 @@ def _turn(
     in_half = point_ok[:, None] & (c < HALF)[None, :]
     turned = point_ok[:, None] & (c < NUM_TURNED)[None, :]
 
-    x_point = X + b * stride_xb + h * stride_xh + n * stride_xn
-    o_point = OUT + b * stride_ob + h * stride_oh + n * stride_on
+    # Offsets in int64: with millions of points, n * stride_xn can be more than 2**31.
+    n_wide = n.to(tl.int64)
+    b_wide = b.to(tl.int64)
+    h_wide = h.to(tl.int64)
+    x_point = X + b_wide * stride_xb + h_wide * stride_xh + n_wide * stride_xn
+    o_point = OUT + b_wide * stride_ob + h_wide * stride_oh + n_wide * stride_on
     x_row = x_point[:, None]
     o_row = o_point[:, None]
     first = tl.load(x_row + c[None, :], mask=in_half, other=0.0).to(compute)
     second = tl.load(x_row + HALF + c[None, :], mask=in_half, other=0.0).to(compute)
 
     # Pairs beyond NUM_TURNED keep angle zero: cosine 1, sine 0.
-    table = n[:, None] * NUM_TURNED + c[None, :]
+    table = n_wide[:, None] * NUM_TURNED + c[None, :]
     cos = tl.load(COS + table, mask=turned, other=1.0).to(compute)
     sin = tl.load(SIN + table, mask=turned, other=0.0).to(compute)
     if SIGN < 0:
