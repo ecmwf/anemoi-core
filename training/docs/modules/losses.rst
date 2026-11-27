@@ -62,6 +62,66 @@ reference it in the config as follows:
             scalers: [pressure_level, general_variable, node_weights, time_steps]
 
 ******************************
+ Target-weighted Loss Wrapper
+******************************
+
+``TargetWeightedLoss`` wraps a point-wise loss (``MSELoss``,
+``MAELoss``, ``HuberLoss``, ``LogCoshLoss`` or the ensemble ``CRPS``) and down-weights the grid
+points of selected variables whose target is zero. It is meant for
+sparse, non-negative targets, such as a mask that is one in a single
+grid cell around an event and zero elsewhere, where the few positive
+points contribute little to an unweighted loss and the model is pulled
+towards small values.
+
+For each variable in ``zero_target_weights`` the point-wise error is
+multiplied by ``1`` where the target is positive and by the given weight
+where the target is zero (or negative). The weights are passed to the
+inner loss as its ``weights`` argument, so they multiply the error before
+the scalers and the reduction of the inner loss and compose
+multiplicatively with all scalers (node weights, ``general_variable``,
+...) and with any ``weights`` given to the loss (for example by EDM
+diffusion). Other variables and the result without ``zero_target_weights``
+are identical to the inner loss. NaN targets are handled by the inner
+loss (``ignore_nans``) and contribute no error. Gridded and tabular
+sources are supported.
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.TargetWeightedLoss
+            zero_target_weights:
+               tc_mask: 1.0e-3 # weight of zero targets, positive targets have weight 1
+            loss_fn:
+               _target_: anemoi.training.losses.MSELoss
+               scalers: [general_variable, node_weights]
+               ignore_nans: true
+               # predicted_variables / target_variables belong to loss_fn
+
+The weights must be finite and strictly positive and the variables must
+be among the variables of ``loss_fn`` (all model outputs unless
+``predicted_variables`` is set there); a missing variable raises a
+``ValueError`` when the loss is first called. The inner loss must apply
+``weights`` to its point-wise value (``MSELoss``, ``MAELoss``,
+``HuberLoss``, ``LogCoshLoss`` and ``CRPS``). Other losses (spectral
+losses, the energy and variogram scores, ``RMSELoss``, other wrappers)
+are rejected with an error. The weight is computed from the target,
+which has no ensemble members: for ``CRPS`` it multiplies the point-wise
+CRPS of the whole ensemble (one value per grid point and variable), so
+all members are weighted alike.
+
+For a binary (0 or 1) target that is 1 with conditional probability
+``p``, the plain squared error is minimised by ``p`` itself (not by
+zero), and with the weight ``w`` of zero targets the minimiser of the
+weighted squared error is ``q = p / (p + w (1 - p))``. Small ``w`` thus
+raises the output wherever ``p`` is not negligible compared with ``w``:
+the output is a cost-sensitive score, not a calibrated probability. This
+holds for binary targets only. For general positive targets the weight
+just changes the relative cost of the zero-target points. The loss value
+is not comparable with the unweighted loss.
+
+******************************
  Probabilistic Loss Functions
 ******************************
 

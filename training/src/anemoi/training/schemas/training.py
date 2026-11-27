@@ -480,6 +480,34 @@ class TimeAggregateLossWrapperSchema(BaseModel):
         return self
 
 
+class TargetWeightedLossSchema(BaseModel):
+    """Schema for TargetWeightedLoss, a wrapper that down-weights the points of selected variables with zero targets."""
+
+    target_: Literal["anemoi.training.losses.TargetWeightedLoss"] = Field(..., alias="_target_")
+    zero_target_weights: dict[str, Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(default_factory=dict)
+    """Variable name -> weight of the point-wise error where the target is not positive. Points with a positive
+    target have weight 1. Names refer to the variables kept by ``predicted_variables`` of ``loss_fn``."""
+    loss_fn: BaseLossSchema
+    "Inner loss function, any point-wise loss without a custom forward (e.g. MSELoss, MAELoss, HuberLoss)."
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+    ignore_nans: bool = False
+
+    @field_validator("loss_fn", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper."""
+        from omegaconf import DictConfig
+        from omegaconf.omegaconf import open_dict
+
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        elif isinstance(v, DictConfig) and "scalers" not in v:
+            with open_dict(v):
+                v["scalers"] = []
+        return v
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     per_scale_loss: (
@@ -645,6 +673,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.TargetWeightedLoss": "target_weighted",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -679,7 +708,8 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
-            | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
+            | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
+            | Annotated[TargetWeightedLossSchema, Tag("target_weighted")],
             Discriminator(_loss_discriminator),
         ]
     ] = Field(min_length=1)
@@ -739,6 +769,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
+    | Annotated[TargetWeightedLossSchema, Tag("target_weighted")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
 ]
