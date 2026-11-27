@@ -142,12 +142,6 @@ class VariableMaskingScalerSchema(BaseModel):
     "Flag to invert the variable mask."
 
 
-class NaNMaskScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
-    use_processors_tendencies: bool = Field(default=False)
-    "Flag to include processors for tendencies when building the loss mask."
-
-
 class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
@@ -252,7 +246,6 @@ ScalerSchema = (
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
-    | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema
@@ -266,7 +259,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
-    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
@@ -436,6 +428,21 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
         return self
 
 
+def _check_wrapper_ignore_nans(wrapper: str, ignore_nans: bool, inner: BaseModel) -> None:
+    """Reject ``ignore_nans`` on a loss wrapper whose inner loss does not ignore NaNs.
+
+    Mirrors ``BaseLossWrapper``: the wrapper's effective ``ignore_nans`` is its own value or-ed with
+    the inner loss's, and a wrapper that ignores NaNs around an inner loss that does not is an error.
+    The flag is not passed down, so set it on the inner loss.
+    """
+    if ignore_nans and not inner.ignore_nans:
+        msg = (
+            f"{wrapper} sets 'ignore_nans: true' but its inner loss does not. "
+            "Set 'ignore_nans: true' on the inner loss too (the wrapper does not pass it down)."
+        )
+        raise ValueError(msg)
+
+
 class TimeAggregateLossWrapperSchema(BaseModel):
     """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
 
@@ -446,6 +453,8 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``loss_fn.ignore_nans``; ``true`` requires it on ``loss_fn`` too."
 
     @field_validator("loss_fn", mode="before")
     @classmethod
@@ -465,6 +474,11 @@ class TimeAggregateLossWrapperSchema(BaseModel):
                     v["scalers"] = []
         return v
 
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("TimeAggregateLossWrapper", self.ignore_nans, self.loss_fn)
+        return self
+
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
@@ -481,6 +495,8 @@ class MultiScaleLossSchema(BaseModel):
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``per_scale_loss.ignore_nans``; ``true`` requires it there too."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -502,6 +518,11 @@ class MultiScaleLossSchema(BaseModel):
                 with open_dict(v):
                     v["scalers"] = []
         return v
+
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("MultiscaleLossWrapper", self.ignore_nans, self.per_scale_loss)
+        return self
 
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
@@ -768,15 +789,6 @@ StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | Si
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class UpdateDsStatsOnCkptLoadSchema(BaseModel):
-    """Configuration for updating processor statistics on checkpoint load."""
-
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
-
-
 class CheckpointPipelineSchema(BaseModel):
     """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
 
@@ -809,8 +821,6 @@ class BaseTrainingSchema(BaseModel):
     " whose variable set is a superset of the current dataset's is accepted instead of raising,"
     " provided the shared variables keep the same relative order; the variable-dependent layers"
     " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
-    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
-    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)
     "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
     " acquisition source under `source`, a loading strategy under `loading`, and/or an"
@@ -823,6 +833,9 @@ class BaseTrainingSchema(BaseModel):
     "Precision"
     preferred_blas_backend: str | None = Field(default=None)
     "Optionally override PyTorch's default BLAS backend."
+    float32_matmul_precision: Literal["highest", "high", "medium"] = Field(default="high")
+    "Precision of float32 matrix products, passed to torch.set_float32_matmul_precision. With 'high', the products"
+    " may use TF32."
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
@@ -837,7 +850,7 @@ class BaseTrainingSchema(BaseModel):
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
-    "Dynamic rescaling of the loss gradient. Not yet tested."
+    "Dynamic rescaling of the loss gradient. Temporarily unavailable: must be false."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
@@ -895,16 +908,16 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
 
 
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
-    "Endpoint semantics for the transport objective."
-    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
-    "Transport objective used to perturb targets and train the model."
+    training_condition: dict = Field(..., examples=[{"distribution": "karras", "sigma_max": 100.0}])
+    """Distribution of the noise level (EDM) or time (flow matching) drawn once per sample and member during
+    training: ``distribution`` names a registered distribution, the other keys are its settings. The objective
+    and the prediction mode come from the model."""
 
 
 class TransportTrainingSchema(BaseTrainingSchema):
     method: TransportTrainingMethodSchema
     "Training method."
-    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    transport: TransportTrainingConfigSchema
     "Transport training configuration."
 
 

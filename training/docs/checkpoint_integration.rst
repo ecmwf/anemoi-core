@@ -232,9 +232,9 @@ time) or through Lightning's own ``on_load_checkpoint`` hook. These live as
 module-level functions in ``anemoi.training.checkpoint.loading.base`` and are
 the single home for that logic:
 
--  ``apply_checkpoint_corrections`` — the one entry point for the three steps
+-  ``apply_checkpoint_corrections`` — the one entry point for the two steps
    that change the checkpoint, in one fixed order: the chunking-fix migration,
-   then the trainable-edge-permutation migration, then the processor refresh.
+   then the trainable-edge-permutation migration.
    The pipeline strategies call it (``LoadingStrategy._apply_corrections``) and
    so does ``on_load_checkpoint`` on a resume. It runs:
 
@@ -242,9 +242,6 @@ the single home for that logic:
       checkpoint's processor declares ``num_layers`` / ``num_chunks``.
    -  the anemoi-models ``trainable_edge_perm_fix`` migration, applied directly
       with the live model.
-   -  ``refresh_checkpoint_processors``: rebuild stale pre/post-processor
-      weights from the current model when
-      ``training.update_ds_stats_on_ckpt_load.{states,tendencies}`` is set.
 -  ``preserve_anemoi_metadata`` — restore ``model._ckpt_model_name_to_index``
    from the checkpoint's ``data_indices`` (multi-dataset aware).
 -  ``extract_checkpoint_variables_metadata`` — populate

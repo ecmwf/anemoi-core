@@ -166,7 +166,7 @@ def test_real_edge_perm_migration_leaves_a_model_without_graph_providers_alone()
     """The shipped edge-perm migration finds no graph provider on the model and returns the checkpoint as is."""
     checkpoint = {"state_dict": {}}
 
-    assert loading_base.apply_checkpoint_corrections(checkpoint, _Model(), None) is checkpoint
+    assert loading_base.apply_checkpoint_corrections(checkpoint, _Model()) is checkpoint
     assert checkpoint == {"state_dict": {}}
 
 
@@ -324,9 +324,9 @@ def test_real_chunking_fix_is_idempotent() -> None:
     ckpt = _ckpt()  # num_layers=4, num_chunks=2: two blocks per chunk
     ckpt["state_dict"] = {"model.model.processor.proc.1.blocks.0.mlp.weight": weight}
 
-    once = loading_base.apply_checkpoint_corrections(ckpt, None, None)
+    once = loading_base.apply_checkpoint_corrections(ckpt, None)
     assert list(once["state_dict"]) == ["model.model.processor.proc.2.mlp.weight"]
 
-    twice = loading_base.apply_checkpoint_corrections(once, None, None)
+    twice = loading_base.apply_checkpoint_corrections(once, None)
     assert list(twice["state_dict"]) == ["model.model.processor.proc.2.mlp.weight"]
     assert twice["state_dict"]["model.model.processor.proc.2.mlp.weight"] is weight
