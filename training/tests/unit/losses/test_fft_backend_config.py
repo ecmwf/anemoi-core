@@ -23,7 +23,6 @@ from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.schemas.training import LossSchemas
 
-
 _LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
