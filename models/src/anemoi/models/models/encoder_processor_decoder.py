@@ -31,6 +31,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
+from anemoi.models.layers.graph_provider import BaseGraphProvider
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.node_embedder import NOOP_NODE_EMBEDDER_TARGET
 from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
@@ -292,6 +293,25 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=next(iter(edge_dims.values())),
             )
 
+    @staticmethod
+    def _create_graph_provider(
+        src_name: str,
+        dst_name: str,
+        layer_config: DotDict,
+        static_graph: HeteroData,
+        dynamic_graph_config: DotDict,
+    ) -> BaseGraphProvider:
+        """Build the graph provider for the edges from ``src_name`` to ``dst_name`` of the layer ``layer_config``."""
+        edge_type = (src_name, "to", dst_name)
+        return create_graph_provider(
+            graph=_edges_or_none(static_graph, edge_type),
+            edge_attribute_names=layer_config.get("sub_graph_edge_attributes"),
+            **dynamic_graph_config.get(edge_type, {}),
+            src_size=static_graph[src_name].num_nodes,
+            dst_size=static_graph[dst_name].num_nodes,
+            trainable_size=layer_config.get("trainable_size", 0),
+        )
+
     def _build_encoding_graphproviders(
         self, encoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
@@ -306,16 +326,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             encoder_config = encoders_config[self.dataset2encoder[dataset_name]]
-            hidden_name = self.dataset2hidden[dataset_name]
-
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=_edges_or_none(static_graph, (dataset_name, "to", hidden_name)),
-                edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config.get((dataset_name, "to", hidden_name), {}),
-                src_size=static_graph[dataset_name].num_nodes,
-                dst_size=static_graph[hidden_name].num_nodes,
-                trainable_size=encoder_config.mapper.get("trainable_size", 0),
+            self.encoder_graph_provider[dataset_name] = self._create_graph_provider(
+                dataset_name,
+                self.dataset2hidden[dataset_name],
+                encoder_config.mapper,
+                static_graph,
+                dynamic_graph_config,
             )
 
     def _build_processing_graphproviders(
@@ -325,13 +341,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.processor_graph_provider = torch.nn.ModuleDict()
         for hidden_name in self.hidden_names:
-            self.processor_graph_provider[hidden_name] = create_graph_provider(
-                graph=_edges_or_none(static_graph, (hidden_name, "to", hidden_name)),
-                edge_attribute_names=processor_config.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config.get((hidden_name, "to", hidden_name), {}),
-                src_size=static_graph[hidden_name].num_nodes,
-                dst_size=static_graph[hidden_name].num_nodes,
-                trainable_size=processor_config.get("trainable_size", 0),
+            self.processor_graph_provider[hidden_name] = self._create_graph_provider(
+                hidden_name, hidden_name, processor_config, static_graph, dynamic_graph_config
             )
 
     def _build_processing_networks(self, processor_config: DotDict) -> None:
@@ -368,14 +379,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             decoder_config = decoders_config[self.dataset2decoder[dataset_name]]
-            hidden_name = self.dataset2hidden[dataset_name]
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=_edges_or_none(static_graph, (hidden_name, "to", dataset_name)),
-                edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config.get((hidden_name, "to", dataset_name), {}),
-                src_size=static_graph[hidden_name].num_nodes,
-                dst_size=static_graph[dataset_name].num_nodes,
-                trainable_size=decoder_config.mapper.get("trainable_size", 0),
+            self.decoder_graph_provider[dataset_name] = self._create_graph_provider(
+                self.dataset2hidden[dataset_name],
+                dataset_name,
+                decoder_config.mapper,
+                static_graph,
+                dynamic_graph_config,
             )
 
     def _build_decoding_networks(self, decoders_config: DotDict) -> None:
@@ -774,6 +783,112 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             **(mapper_kwargs or {}),
         )
 
+    def _initial_hidden_latent(
+        self,
+        hidden_name: str,
+        *,
+        batch_size: int,
+        device: torch.device,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> tuple[Tensor, Tensor, ShardSizes]:
+        """The starting latent of a hidden mesh: its coordinates and trainable parameters, one copy per sample.
+
+        Returns the mesh coordinates, the latent (sharded across the model group) and its shard sizes.
+        """
+        hidden_coordinates = self._hidden_coordinates(hidden_name).to(device)
+        x_hidden_latent = latlons_to_sincos(hidden_coordinates)
+        x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
+
+        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=batch_size)
+        if hidden_trainable_parameters is not None:
+            x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
+
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+        return hidden_coordinates, x_hidden_latent, shard_sizes_hidden
+
+    @staticmethod
+    def _hidden_edges(
+        graph_provider: BaseGraphProvider,
+        src_coordinates: Tensor,
+        dst_coordinates: Tensor,
+        x_latent: Tensor,
+        *,
+        batch_size: int,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> tuple[Tensor, Tensor, ShardSizes]:
+        """Edges between two hidden meshes (or within one), on the device and in the dtype of ``x_latent``."""
+        edge_attr, edge_index, edge_shard_sizes = graph_provider.get_edges(
+            src_coords=src_coordinates,
+            dst_coords=dst_coordinates,
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+        return (
+            edge_attr.to(device=x_latent.device, dtype=x_latent.dtype),
+            edge_index.to(x_latent.device),
+            edge_shard_sizes,
+        )
+
+    def _run_processor(
+        self,
+        processor: torch.nn.Module,
+        graph_provider: BaseGraphProvider,
+        x_latent: Tensor,
+        *,
+        hidden_coordinates: Tensor,
+        shard_sizes_hidden: ShardSizes,
+        batch_size: int,
+        model_comm_group: ProcessGroup | None = None,
+        **processor_kwargs,
+    ) -> Tensor:
+        """Run ``processor`` on the latent of one hidden mesh, over the edges of ``graph_provider``."""
+        edge_attr, edge_index, edge_shard_sizes = self._hidden_edges(
+            graph_provider,
+            hidden_coordinates,
+            hidden_coordinates,
+            x_latent,
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+        return processor(
+            x=x_latent,
+            batch_size=batch_size,
+            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=edge_shard_sizes),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+            **processor_kwargs,
+        )
+
+    def _process(
+        self,
+        x_latent: Tensor,
+        *,
+        hidden_name: str,
+        hidden_coordinates: Tensor,
+        shard_sizes_hidden: ShardSizes,
+        batch_size: int,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> Tensor:
+        """Turn the aggregated latent on ``hidden_name`` into the latent the decoders read.
+
+        Runs the processor on that mesh, with the latent skip connection when it is enabled.
+        """
+        x_latent_proc = self._run_processor(
+            self.processor,
+            self.processor_graph_provider[hidden_name],
+            x_latent,
+            hidden_coordinates=hidden_coordinates,
+            shard_sizes_hidden=shard_sizes_hidden,
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
+        if self.latent_skip:
+            x_latent_proc = x_latent_proc + x_latent
+        return x_latent_proc
+
     def _encode_sources(
         self,
         encoder_name: str,
@@ -881,18 +996,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_data_latent_dict = {}
 
         # Prepare hidden latent
-        hidden_coordinates = self._hidden_coordinates(hidden_name).to(batch.device)
+        hidden_coordinates, x_hidden_latent, shard_sizes_hidden = self._initial_hidden_latent(
+            hidden_name, batch_size=batch_size, device=batch.device, model_comm_group=model_comm_group
+        )
         hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=batch_size)
         hidden_batch_sizes = (hidden_coordinates.shape[0],) * batch_size
-        x_hidden_latent = latlons_to_sincos(hidden_coordinates)
-        x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
-
-        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=batch_size)
-        if hidden_trainable_parameters is not None:
-            x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
-
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
         # Encoders are iterated in config order, and their source datasets in the order listed
         # under `source_datasets`, so the fusing order is the one the user wrote down.
@@ -933,29 +1041,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider[
-            hidden_name
-        ].get_edges(
-            src_coords=hidden_coordinates,
-            dst_coords=hidden_coordinates,
+        x_latent_proc = self._process(
+            x_latent,
+            hidden_name=hidden_name,
+            hidden_coordinates=hidden_coordinates,
+            shard_sizes_hidden=shard_sizes_hidden,
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
-        processor_edge_index = processor_edge_index.to(x_latent.device)
-
-        x_latent_proc = self.processor(
-            x=x_latent,
-            batch_size=batch_size,
-            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-        )
-
-        # Latent skip connection
-        if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}

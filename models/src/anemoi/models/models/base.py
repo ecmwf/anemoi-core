@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from collections.abc import Mapping
 from typing import Optional
 
 import torch
@@ -36,7 +35,6 @@ from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.models.utils.graphs import hidden_node_names
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -249,6 +247,11 @@ class BaseGraphModel(nn.Module):
         elif isinstance(hidden_nodes_name, (list, ListConfig)):
             # Hierarchical levels: every dataset is encoded into the first level.
             self.hidden_names = list(hidden_nodes_name)
+            repeated = sorted({name for name in self.hidden_names if self.hidden_names.count(name) > 1})
+            if repeated:
+                raise ValueError(
+                    f"Each hierarchical level must be named once in hidden_nodes_name, got {repeated} more than once."
+                )
             self.dataset2hidden = dict.fromkeys(self.dataset_names, self.hidden_names[0])
         else:
             raise TypeError(
@@ -447,12 +450,6 @@ class BaseGraphModel(nn.Module):
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
         return time_steps_per_node(self, dataset_name, self.n_step_output) * self.num_output_channels[dataset_name]
-
-    @staticmethod
-    def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig | Mapping[str, str],
-    ) -> list[str]:
-        return hidden_node_names(hidden_nodes_name)
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
